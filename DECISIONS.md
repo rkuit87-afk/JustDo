@@ -1,0 +1,1 @@
+Decision #0001: The Truth Comes First replaces The Artisan Comes First as the primary guiding principle because it is more universal, more objective, and still preserves the project's commitment to reducing unnecessary burden on the people doing the work. The system exists to reveal reality, not to protect any role or hierarchy.
