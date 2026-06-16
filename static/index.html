@@ -260,6 +260,35 @@ hr{border:none;border-top:1px solid var(--border);margin:12px 0}
   </div>
 </div>
 
+<!-- ================= SET PIN MODAL =================== -->
+<div id="set-pin-modal" class="modal-overlay">
+  <div class="modal">
+    <h3 id="set-pin-title">Set Your PIN</h3>
+    <p id="set-pin-sub" style="font-size:12px;color:var(--text3);text-align:center;margin:0 0 14px">Choose a 4-digit PIN you'll use to log in</p>
+    <div class="pin-dots">
+      <div class="pin-dot" id="spd0"></div>
+      <div class="pin-dot" id="spd1"></div>
+      <div class="pin-dot" id="spd2"></div>
+      <div class="pin-dot" id="spd3"></div>
+    </div>
+    <div class="pin-pad">
+      <button class="pin-key" onclick="setPinKey('1')">1</button>
+      <button class="pin-key" onclick="setPinKey('2')">2</button>
+      <button class="pin-key" onclick="setPinKey('3')">3</button>
+      <button class="pin-key" onclick="setPinKey('4')">4</button>
+      <button class="pin-key" onclick="setPinKey('5')">5</button>
+      <button class="pin-key" onclick="setPinKey('6')">6</button>
+      <button class="pin-key" onclick="setPinKey('7')">7</button>
+      <button class="pin-key" onclick="setPinKey('8')">8</button>
+      <button class="pin-key" onclick="setPinKey('9')">9</button>
+      <button class="pin-key" onclick="setPinCancel()" style="font-size:13px;color:var(--text3)">Cancel</button>
+      <button class="pin-key" onclick="setPinKey('0')">0</button>
+      <button class="pin-key" onclick="setPinBackspace()" style="font-size:13px">&#9003;</button>
+    </div>
+    <div id="set-pin-err" style="color:var(--red);font-size:12px;text-align:center;margin-top:10px;min-height:16px"></div>
+  </div>
+</div>
+
 <!-- ===================== PIN MODAL ==================== -->
 <div id="pin-modal" class="modal-overlay">
   <div class="modal">
@@ -654,22 +683,7 @@ hr{border:none;border-top:1px solid var(--border);margin:12px 0}
         <input id="alloc-title" placeholder="e.g. Inspect conveyor belt drive">
       </div>
       <div class="form-row"><label>Equipment (optional)</label>
-        <select id="alloc-equip" style="display:none"></select>
-      </div>
-      <!-- Inline plant tree for equipment selection -->
-      <div class="plant-tree-wrap" id="alloc-tree-wrap" style="margin-bottom:12px">
-        <div class="plant-breadcrumb" id="alloc-tree-breadcrumb">
-          <span class="plant-breadcrumb-item" onclick="allocTreeRoot()">Plant</span>
-        </div>
-        <div class="plant-node-list" id="alloc-tree-nodes">
-          <div style="padding:16px;text-align:center;color:var(--text3);font-size:13px">Loading…</div>
-        </div>
-      </div>
-      <!-- Selected machine bar (appears after picking a leaf) -->
-      <div id="alloc-selected-bar" style="display:none;align-items:center;gap:10px;padding:10px 14px;background:rgba(59,130,246,.08);border:1px solid var(--blue);border-radius:8px;margin-bottom:12px">
-        <span style="font-size:15px">📟</span>
-        <span id="alloc-selected-name" style="font-weight:700;font-size:13px;flex:1;color:var(--blue)"></span>
-        <button class="btn btn-ghost btn-sm" onclick="allocTreeRoot()">↩ Change</button>
+        <select id="alloc-equip"><option value="">— None —</option></select>
       </div>
       <div class="form-row"><label>Assign to</label>
         <select id="alloc-user"><option value="">Select artisan...</option></select>
@@ -1881,7 +1895,73 @@ function selectUser(u) {
     document.getElementById('pin-err').textContent = '';
     document.getElementById('pin-modal').classList.add('open');
   } else {
-    loginUser(u);
+    openSetPin(u);
+  }
+}
+
+// ── Set-PIN flow (first login) ──────────────────────────
+let _setPinUser = null;
+let _setPinFirst = '';
+let _setPinBuf = '';
+let _setPinStep = 1; // 1=enter, 2=confirm
+
+function openSetPin(u) {
+  _setPinUser = u;
+  _setPinFirst = '';
+  _setPinBuf = '';
+  _setPinStep = 1;
+  document.getElementById('set-pin-title').textContent = `Welcome, ${u.name}!`;
+  document.getElementById('set-pin-sub').textContent = 'Choose a 4-digit PIN you\'ll use to log in';
+  document.getElementById('set-pin-err').textContent = '';
+  updateSetPinDots();
+  document.getElementById('set-pin-modal').classList.add('open');
+}
+
+function setPinKey(k) {
+  if (_setPinBuf.length >= 4) return;
+  _setPinBuf += k;
+  updateSetPinDots();
+  if (_setPinBuf.length === 4) setTimeout(setPinNext, 150);
+}
+function setPinBackspace() { _setPinBuf = _setPinBuf.slice(0,-1); updateSetPinDots(); }
+function setPinCancel() {
+  document.getElementById('set-pin-modal').classList.remove('open');
+}
+function updateSetPinDots() {
+  for (let i=0;i<4;i++) {
+    document.getElementById('spd'+i).classList.toggle('filled', i < _setPinBuf.length);
+  }
+}
+
+async function setPinNext() {
+  if (_setPinStep === 1) {
+    _setPinFirst = _setPinBuf;
+    _setPinBuf = '';
+    _setPinStep = 2;
+    document.getElementById('set-pin-title').textContent = 'Confirm your PIN';
+    document.getElementById('set-pin-sub').textContent = 'Enter the same 4-digit PIN again';
+    document.getElementById('set-pin-err').textContent = '';
+    updateSetPinDots();
+  } else {
+    if (_setPinBuf !== _setPinFirst) {
+      document.getElementById('set-pin-err').textContent = 'PINs do not match — try again';
+      _setPinFirst = '';
+      _setPinBuf = '';
+      _setPinStep = 1;
+      document.getElementById('set-pin-title').textContent = `Welcome, ${_setPinUser.name}!`;
+      document.getElementById('set-pin-sub').textContent = 'Choose a 4-digit PIN you\'ll use to log in';
+      updateSetPinDots();
+      return;
+    }
+    const r = await api(`/api/users/${_setPinUser.id}/pin`, 'POST', { pin: _setPinFirst });
+    if (r?.status === 'ok') {
+      const u = users.find(x => x.id === _setPinUser.id);
+      if (u) u.has_pin = 1;
+      document.getElementById('set-pin-modal').classList.remove('open');
+      loginUser(_setPinUser);
+    } else {
+      document.getElementById('set-pin-err').textContent = 'Could not save PIN — try again';
+    }
   }
 }
 
@@ -2949,8 +3029,10 @@ async function showAdminBoard() {
   document.getElementById('admin').classList.add('active');
   document.getElementById('ad-username').textContent = session.user.name;
 
-  // Init inline alloc tree
-  allocTreeInit();
+  // Populate equipment dropdown
+  const aeq = document.getElementById('alloc-equip');
+  aeq.innerHTML = '<option value="">— None —</option>';
+  (equipment||[]).forEach(e => aeq.innerHTML += `<option value="${e.id}">${e.name}</option>`);
 
   // Populate alloc user
   const usel = document.getElementById('alloc-user');
@@ -3133,7 +3215,7 @@ async function submitAllocation() {
   document.getElementById('alloc-recurring').value = 'no';
   document.getElementById('alloc-recurring-fields').style.display = 'none';
   toggleAllocChecklist();
-  allocTreeRoot();
+  document.getElementById('alloc-equip').value = '';
   showToast('Job allocated - now on artisan board','green');
 }
 
