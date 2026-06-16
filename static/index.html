@@ -243,8 +243,8 @@ hr{border:none;border-top:1px solid var(--border);margin:12px 0}
         <button class="subrole-btn" onclick="loginSelectSubrole('Boilermaker',this)">Boilermakers</button>
         <button class="subrole-btn" onclick="loginSelectSubrole('Electrician',this)">Electricians</button>
         <button class="subrole-btn" onclick="loginSelectSubrole('Fitter',this)">Fitters</button>
-
         <button class="subrole-btn" onclick="loginSelectSubrole('Operator',this)">Operators</button>
+        <button class="subrole-btn" onclick="loginSelectSubrole('team_leader',this)" style="border-color:rgba(146,64,14,0.5);color:#b45309">Team Leaders</button>
       </div>
       <div class="section-title" style="margin-bottom:8px">Select your name</div>
       <div id="art-grid" class="user-grid"></div>
@@ -1838,7 +1838,9 @@ function loginSelectSubrole(subrole, btn) {
 
   let filtered = allUsers.filter(u => u.role === 'artisan' || u.role === 'team_leader');
 
-  if (subrole !== 'all') {
+  if (subrole === 'team_leader') {
+    filtered = filtered.filter(u => u.role === 'team_leader');
+  } else if (subrole !== 'all') {
     filtered = filtered.filter(u =>
       u.name.toLowerCase().includes(subrole.toLowerCase()) ||
       (u.trade && u.trade.toLowerCase().includes(subrole.toLowerCase()))
