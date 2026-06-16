@@ -431,8 +431,11 @@ hr{border:none;border-top:1px solid var(--border);margin:12px 0}
     <div id="sv-log-form" class="card">
       <div class="card-title">Log Production Breakdown</div>
       <div style="font-size:12px;color:var(--text3);margin-bottom:12px">Start time is captured automatically when you tap Log Breakdown.</div>
-      <div class="form-row"><label>Equipment</label>
-        <select id="sv-equip"><option value="">Select equipment...</option></select>
+      <div class="form-row"><label>Area</label>
+        <select id="sv-area" onchange="filterEquipByArea('sv-area','sv-equip')"><option value="">Select area...</option></select>
+      </div>
+      <div class="form-row"><label>Machine</label>
+        <select id="sv-equip"><option value="">Select machine...</option></select>
       </div>
       <div class="form-row"><label>Assign to artisan</label>
         <select id="sv-artisan"><option value="">Select artisan...</option></select>
@@ -561,8 +564,11 @@ hr{border:none;border-top:1px solid var(--border);margin:12px 0}
     <div id="mgr-log-form" class="card">
       <div class="card-title">Log Breakdown</div>
       <div style="font-size:12px;color:var(--text3);margin-bottom:12px">Start time captured automatically. Complete failure details after repair.</div>
-      <div class="form-row"><label>Equipment</label>
-        <select id="mgr-equip"><option value="">Select equipment...</option></select>
+      <div class="form-row"><label>Area</label>
+        <select id="mgr-area" onchange="filterEquipByArea('mgr-area','mgr-equip')"><option value="">Select area...</option></select>
+      </div>
+      <div class="form-row"><label>Machine</label>
+        <select id="mgr-equip"><option value="">Select machine...</option></select>
       </div>
       <div class="form-row"><label>Attending artisan</label>
         <select id="mgr-artisan"><option value="">Select artisan...</option></select>
@@ -660,8 +666,11 @@ hr{border:none;border-top:1px solid var(--border);margin:12px 0}
       <div class="form-row"><label>Job title</label>
         <input id="alloc-title" placeholder="e.g. Inspect conveyor belt drive">
       </div>
-      <div class="form-row"><label>Equipment (optional)</label>
-        <select id="alloc-equip"><option value="">— None —</option></select>
+      <div class="form-row"><label>Area (optional)</label>
+        <select id="alloc-area" onchange="filterEquipByArea('alloc-area','alloc-equip')"><option value="">— No equipment —</option></select>
+      </div>
+      <div class="form-row" id="alloc-equip-row" style="display:none"><label>Machine</label>
+        <select id="alloc-equip"><option value="">Select machine...</option></select>
       </div>
       <div class="form-row"><label>Assign to</label>
         <select id="alloc-user"><option value="">Select artisan...</option></select>
@@ -2444,9 +2453,8 @@ async function showSupervisorBoard() {
     equipment.forEach(e => { svReqEq.innerHTML += `<option value="${e.id}">${e.name}</option>`; });
   }
 
-  const svEq = document.getElementById('sv-equip');
-  svEq.innerHTML = '<option value="">Select equipment...</option>';
-  (equipment||[]).forEach(e => svEq.innerHTML += `<option value="${e.id}">${e.name}</option>`);
+  populateAreaDropdown('sv-area', 'Select area...');
+  document.getElementById('sv-equip').innerHTML = '<option value="">Select machine...</option>';
   loadSvActiveBreakdowns();
 }
 
@@ -2605,12 +2613,14 @@ async function submitMgrBreakdown() {
 }
 
 function resetSvBdForm() {
-  document.getElementById('sv-equip').value = '';
+  document.getElementById('sv-area').value = '';
+  document.getElementById('sv-equip').innerHTML = '<option value="">Select machine...</option>';
   document.getElementById('sv-artisan').value = '';
 }
 
 function resetMgrBdForm() {
-  document.getElementById('mgr-equip').value = '';
+  document.getElementById('mgr-area').value = '';
+  document.getElementById('mgr-equip').innerHTML = '<option value="">Select machine...</option>';
   document.getElementById('mgr-artisan').value = '';
 }
 
@@ -2808,9 +2818,8 @@ async function showManagerBoard() {
     artSel.innerHTML += `<option value="${u.id}">${u.name}${u.role==='team_leader'?' (TL)':''}</option>`;
   });
 
-  const mgrEq = document.getElementById('mgr-equip');
-  mgrEq.innerHTML = '<option value="">Select equipment...</option>';
-  (equipment||[]).forEach(e => mgrEq.innerHTML += `<option value="${e.id}">${e.name}</option>`);
+  populateAreaDropdown('mgr-area', 'Select area...');
+  document.getElementById('mgr-equip').innerHTML = '<option value="">Select machine...</option>';
   loadMgrActiveBreakdowns();
   loadMgrOverview();
 }
@@ -2996,10 +3005,9 @@ async function showAdminBoard() {
   document.getElementById('admin').classList.add('active');
   document.getElementById('ad-username').textContent = session.user.name;
 
-  // Populate equipment dropdown
-  const aeq = document.getElementById('alloc-equip');
-  aeq.innerHTML = '<option value="">— None —</option>';
-  (equipment||[]).forEach(e => aeq.innerHTML += `<option value="${e.id}">${e.name}</option>`);
+  populateAreaDropdown('alloc-area', '— No equipment —');
+  document.getElementById('alloc-equip').innerHTML = '<option value="">Select machine...</option>';
+  document.getElementById('alloc-equip-row').style.display = 'none';
 
   // Populate alloc user
   const usel = document.getElementById('alloc-user');
@@ -3182,7 +3190,9 @@ async function submitAllocation() {
   document.getElementById('alloc-recurring').value = 'no';
   document.getElementById('alloc-recurring-fields').style.display = 'none';
   toggleAllocChecklist();
-  document.getElementById('alloc-equip').value = '';
+  document.getElementById('alloc-area').value = '';
+  document.getElementById('alloc-equip').innerHTML = '<option value="">Select machine...</option>';
+  document.getElementById('alloc-equip-row').style.display = 'none';
   showToast('Job allocated - now on artisan board','green');
 }
 
@@ -5644,6 +5654,40 @@ function artSelfEquipPicked(node) {
 
 // ============================================================
 // Inline plant tree navigator — Allocate Job tab
+// ============================================================
+// AREA → MACHINE CASCADING DROPDOWNS
+// ============================================================
+const AREA_LABELS = { WM:'Wetmill', DM:'Drymill', UTI:'Utilities', UT:'Utilities', KL:'Kilns', SS:'Sawshop' };
+
+function _equipAreaCode(areaStr) {
+  // 'PRM-WM-002' → 'WM',  'PRM-UTI-016' → 'UTI'
+  const parts = (areaStr || '').split('-');
+  return parts[1] || '';
+}
+
+function populateAreaDropdown(areaSelId, placeholder) {
+  const groups = [...new Set((equipment||[]).map(e => _equipAreaCode(e.area)).filter(Boolean))];
+  groups.sort((a,b) => (AREA_LABELS[a]||a).localeCompare(AREA_LABELS[b]||b));
+  const sel = document.getElementById(areaSelId);
+  if (!sel) return;
+  sel.innerHTML = `<option value="">${placeholder||'Select area...'}</option>`;
+  groups.forEach(g => sel.innerHTML += `<option value="${g}">${AREA_LABELS[g]||g}</option>`);
+}
+
+function filterEquipByArea(areaSelId, equipSelId) {
+  const group = document.getElementById(areaSelId)?.value || '';
+  const sel   = document.getElementById(equipSelId);
+  if (!sel) return;
+  sel.innerHTML = '<option value="">Select machine...</option>';
+  if (group) {
+    (equipment||[]).filter(e => _equipAreaCode(e.area) === group)
+      .forEach(e => sel.innerHTML += `<option value="${e.id}">${e.name}</option>`);
+  }
+  // Show/hide machine row if it's the alloc form
+  const row = document.getElementById('alloc-equip-row');
+  if (row) row.style.display = group ? '' : 'none';
+}
+
 // Uses same API as Components tab but with alloc-tree-* IDs
 // ============================================================
 let _allocStack = [];
