@@ -1,0 +1,309 @@
+# Claude Code Prompt — Mill Maintenance Terminal
+# Feature: Dynamic Equipment Hierarchy — Phase 1: Database Foundation
+# Version: 2 — Anchored to Equipment Register, Auto-Build from Compound IDs
+
+---
+
+## PROJECT CONTEXT
+
+- App: Mill Maintenance Terminal V10.1
+- Stack: Python / Flask / SQLite
+- Runtime: Raspberry Pi at 192.168.2.11:5000
+- Development machine: Windows (use `py` not `python`; use `copy` not `cp`)
+- Current equipment table: FLAT — fields are equipment_id, name, area, section, criticality, planned_hrs_day
+- ~35 existing equipment records with compound IDs already in the database
+- All existing functionality must continue to work unchanged after this phase
+
+---
+
+## WHAT THIS PHASE MUST DO
+
+Build the database foundation for a dynamic, unlimited-depth equipment hierarchy.
+
+This is Phase 1 only. No UI. No API endpoints.
+Only the database tables and helper functions that future phases will build on.
+
+---
+
+## CORE DESIGN PRINCIPLE (READ THIS FIRST)
+
+The hierarchy is a free-form navigation tree. There are no fixed levels.
+
+Do NOT design for:
+  Area → Machine → Component → Sub-Component
+
+DO design for:
+  Any node can have any number of child nodes.
+  Any node can be the parent or the leaf.
+  The tree shape is defined by the administrator, not by the software.
+
+Real-world examples that must be supported without any schema changes:
+
+  Wetmill → Romeo → Saw Heads → Head 1 → Motor → Drive End Bearing
+  Wetmill → Romeo → Infeed → Conveyor → Gearbox → Output Shaft
+  Kilns → Kiln 3 → Fan → Motor → Cooling Fan
+  Wetmill → Romeo → Saw Heads → Head 2 → Motor → Drive End Bearing → Bearing Housing → Seal → Grease Nipple
+
+---
+
+## CRITICAL: HOW EQUIPMENT NUMBERS ANCHOR THE HIERARCHY
+
+The existing equipment register is the single source of truth. Equipment numbers
+(compound IDs like WM-ROM-001) do NOT change. They are the anchor for all
+breakdowns, PM tasks, and reports — now and in the future.
+
+The hierarchy wraps AROUND the equipment register. It is a navigation layer only.
+
+The relationship works like this:
+
+  NAVIGATION TREE          ANCHOR
+  ────────────────         ──────────────────────────
+  Wetmill                  (navigation only, no equipment number)
+    → Romeo                (navigation only, no equipment number)
+      → Saw Heads          (navigation only, no equipment number)
+        → Head 1           (navigation only, no equipment number)
+          → Motor    ────► WM-ROM-SH1-MOT-001  ← equipment record
+                           (this is where breakdowns and PMs attach)
+
+Rules:
+- Only LEAF nodes that represent a trackable, maintainable asset get an equipment_id
+- Mid-level nodes are navigation structure only — no equipment number
+- One equipment_id maps to exactly one leaf node (one-to-one)
+- The equipment_id never changes — only the node's position in the tree can change
+- If an admin decides a sub-component needs its own tracking, they register it as
+  a new equipment number and create a new leaf node for it
+
+---
+
+## AUTO-BUILD: PARSE EXISTING COMPOUND IDs TO CONSTRUCT THE TREE
+
+The existing equipment records have compound IDs that already encode the hierarchy.
+
+Example:
+  WM-ROM-SH1-MOT-001
+  ↓    ↓    ↓    ↓    ↓
+  Wetmill→Romeo→SawH1→Motor→001
+
+Claude Code must:
+
+1. Read ALL existing equipment records from the equipment table
+2. Parse each compound equipment_id to extract the hierarchy segments
+3. Build plant_nodes entries for each unique segment at each level
+4. Reuse existing nodes where segments are shared across equipment IDs
+   (e.g. "WM" and "ROM" should produce ONE node each, not duplicates)
+5. Link each equipment record's leaf node back via equipment.node_id
+6. Flag any equipment_id it could not confidently parse into a clean tree path
+   — write these to a migration_log table so the admin can review and fix manually
+
+The migration must be BEST EFFORT:
+- Build what can be confidently parsed
+- Never fail or block app startup if some IDs don't parse cleanly
+- Flagged records are left with node_id = NULL until manually resolved
+- The function is idempotent — safe to run multiple times, skips already-migrated records
+
+---
+
+## PHASE 1 DELIVERABLES
+
+### 1. New Table: `plant_nodes`
+
+This is the single table that represents every item in the hierarchy.
+
+Required columns:
+
+| Column       | Type    | Notes                                                              |
+|--------------|---------|--------------------------------------------------------------------|
+| id           | INTEGER | Primary key, auto-increment                                        |
+| parent_id    | INTEGER | Foreign key → plant_nodes.id. NULL = root node                     |
+| name         | TEXT    | Display name (e.g. "Romeo", "Drive End Bearing", "Motor")          |
+| label        | TEXT    | Optional free-text descriptor. NOT an enum. Admin-defined.         |
+|              |         | Examples: "Saw Line", "Gearbox", "Bearing". Purely informational.  |
+| equipment_id | TEXT    | Foreign key → equipment.equipment_id. NULL for navigation nodes.   |
+|              |         | Only populated on leaf nodes that represent a registered machine.  |
+| sort_order   | INTEGER | Controls display order among siblings. Default 0                   |
+| active       | INTEGER | 1 = active, 0 = decommissioned. Default 1                          |
+| created_at   | TEXT    | ISO datetime, set on insert                                        |
+| notes        | TEXT    | Optional admin notes                                               |
+
+Important:
+- `label` is free text. Do NOT use an enum or fixed list of types.
+- `equipment_id` is NULL on all navigation/structural nodes.
+- `parent_id` = NULL means this is a top-level operational area (e.g. Wetmill).
+
+---
+
+### 2. New Table: `plant_node_ancestors`
+
+Pre-computed closure table for fast breadcrumb / zoom-out queries.
+
+Answers the question: "What is the full path from root down to this node?"
+
+Required columns:
+
+| Column        | Type    | Notes                                                        |
+|---------------|---------|--------------------------------------------------------------|
+| ancestor_id   | INTEGER | Foreign key → plant_nodes.id                                 |
+| descendant_id | INTEGER | Foreign key → plant_nodes.id                                 |
+| depth         | INTEGER | Levels between ancestor and descendant. 0 = self-reference.  |
+
+This table is maintained automatically whenever a node is inserted or moved.
+
+Why this table exists:
+- Without it, tracing "Grease Nipple → Seal → Bearing Housing → Motor → Head 2 →
+  Saw Heads → Romeo → Wetmill" requires slow recursive queries.
+- With it, the entire breadcrumb trail is one fast query.
+
+---
+
+### 3. New Table: `migration_log`
+
+Records any equipment IDs that could not be confidently auto-parsed during migration.
+
+Required columns:
+
+| Column       | Type  | Notes                                                         |
+|--------------|-------|---------------------------------------------------------------|
+| id           | INTEGER | Primary key                                                 |
+| equipment_id | TEXT  | The equipment_id that could not be parsed                     |
+| reason       | TEXT  | Plain English explanation of why it was flagged               |
+| created_at   | TEXT  | ISO datetime                                                  |
+| resolved     | INTEGER | 0 = needs admin review, 1 = resolved. Default 0            |
+
+---
+
+### 4. Modified Column: `equipment.node_id`
+
+Add a nullable column `node_id` to the existing `equipment` table.
+
+- Type: INTEGER
+- Nullable: YES (NULL until migration places it, or if flagged)
+- Foreign key: plant_nodes.id
+
+Do NOT remove or rename any existing columns in the equipment table.
+Do NOT change any existing foreign keys.
+All existing queries must continue to work without modification.
+
+---
+
+### 5. Database Helper Functions in `database.py`
+
+Add the following Python functions. Every function must include a plain-language
+docstring explaining what it does and when to use it.
+
+**`add_plant_node(parent_id, name, label=None, equipment_id=None, notes=None)`**
+- Inserts a new node into plant_nodes
+- Automatically updates plant_node_ancestors for the new node
+- If equipment_id is provided, also sets equipment.node_id on that equipment record
+- Returns the new node's id
+
+**`get_node_children(node_id)`**
+- Returns direct children of a given node (one level down only)
+- Used by the drill-down navigation UI in Phase 3
+- Returns list of dicts: {id, name, label, equipment_id, sort_order, child_count}
+- child_count tells the UI whether a "→" expand arrow should show
+
+**`get_node_breadcrumb(node_id)`**
+- Returns the full path from root down to the given node
+- Example for node "Drive End Bearing":
+    [Wetmill, Romeo, Saw Heads, Head 2, Motor, Drive End Bearing]
+- Uses plant_node_ancestors for a single efficient query
+- This powers the zoom-out / context trail in the UI
+
+**`get_node_ancestors(node_id)`**
+- Returns all ancestor node ids for a given node, ordered root → parent
+- Used internally and for permission scoping in future phases
+
+**`get_equipment_node(equipment_id)`**
+- Given an equipment_id, returns its plant_node record
+- Also returns the full breadcrumb so callers know where in the tree it sits
+- Used in Phase 4 when breakdown forms need to show equipment context
+
+**`move_node(node_id, new_parent_id)`**
+- Moves a node (and all its children) to a new parent
+- Updates plant_node_ancestors correctly for the entire subtree
+- This is how admins restructure the tree after the initial auto-build
+- Must be safe — validates new_parent_id exists before making changes
+
+**`parse_compound_id(equipment_id)`**
+- Given a compound equipment ID (e.g. "WM-ROM-SH1-MOT-001"), attempts to split
+  it into meaningful hierarchy segments
+- Returns a list of segments if confident, or None if it cannot parse cleanly
+- Used internally by migrate_existing_equipment()
+- Should handle common patterns but not crash on unexpected formats
+
+**`migrate_existing_equipment()`**
+- One-time best-effort migration function
+- Reads all rows from the equipment table
+- Calls parse_compound_id() on each equipment_id
+- For successfully parsed records: builds plant_nodes tree, links equipment.node_id
+- For failed records: writes to migration_log with reason, leaves node_id = NULL
+- Is idempotent — safe to run multiple times, skips already-migrated records
+- Prints a plain-English summary when done:
+    "Successfully placed: 31 equipment records"
+    "Flagged for review: 4 equipment records — see migration_log table"
+- Does NOT modify any existing equipment records beyond setting node_id
+
+---
+
+## BACKWARDS COMPATIBILITY — NON-NEGOTIABLE
+
+1. The equipment table keeps all existing columns unchanged
+2. All existing queries using equipment_id, area, section, criticality work as before
+3. Breakdowns table is NOT modified
+4. PM tasks table is NOT modified
+5. Reporting functions are NOT modified
+6. node_id on equipment is nullable — existing records unaffected until migration runs
+7. App starts and runs normally even if migration has never been run
+
+---
+
+## WHAT CLAUDE CODE MUST NOT DO IN THIS PHASE
+
+- Do NOT build any UI
+- Do NOT create any Flask routes or API endpoints
+- Do NOT use fixed enum values for node labels or types
+- Do NOT impose a maximum depth limit
+- Do NOT assume Area → Machine → Component structure anywhere in code or comments
+- Do NOT fail or raise exceptions if compound IDs don't parse — log and continue
+- Do NOT modify equipment_id values — they are permanent anchors
+
+---
+
+## DELIVERABLES CHECKLIST
+
+Claude Code must confirm each item before finishing:
+
+[ ] plant_nodes table created with correct columns including equipment_id link
+[ ] plant_node_ancestors closure table created
+[ ] migration_log table created
+[ ] equipment.node_id column added (nullable)
+[ ] add_plant_node() inserts node and updates ancestors, handles equipment_id link
+[ ] get_node_children() returns children + child_count
+[ ] get_node_breadcrumb() returns full root-to-node path
+[ ] get_node_ancestors() returns ordered ancestor ids
+[ ] get_equipment_node() returns node + breadcrumb for a given equipment_id
+[ ] move_node() safely relocates a node and updates all ancestors
+[ ] parse_compound_id() handles common patterns, returns None on failure
+[ ] migrate_existing_equipment() is best-effort, idempotent, logs failures
+[ ] All existing tables unchanged except equipment.node_id addition
+[ ] App starts cleanly with no migration having been run
+[ ] No syntax errors
+[ ] Every function has a plain-language docstring
+
+---
+
+## FILES TO ATTACH IN CLAUDE CODE
+
+- `database.py` — Claude Code modifies this file
+- `AI_RULES.md` — Must be followed strictly
+- `app.py` — Reference only, so Claude Code understands existing structure
+
+---
+
+## PHASE ROADMAP (context only — do not build these yet)
+
+- Phase 2: Flask API endpoints — get_children, get_breadcrumb, add_node, move_node, search
+- Phase 3: Navigation UI — drill-down panel, breadcrumb bar, zoom in/out
+- Phase 4: Breakdown and PM forms link to plant_node directly (alongside equipment_id)
+- Phase 5: Admin UI to review migration_log and manually place flagged equipment
+- Phase 6: QR / NFC / RFID scan resolves to a plant_node id
