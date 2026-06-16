@@ -161,10 +161,14 @@ def add_user():
     name = str(d.get('name', '')).strip()
     role = d.get('role')
     
-    valid_roles = {'manager', 'admin', 'supervisor', 'artisan', 'sawshop'}
+    valid_roles = {'manager', 'admin', 'supervisor', 'artisan', 'sawshop', 'team_leader', 'picker', 'storeman', 'stores_admin'}
     if not name or role not in valid_roles:
         return jsonify({'status': 'error', 'message': f'Valid name and role required. Valid roles: {valid_roles}'}), 400
-    
+
+    creator_role = d.get('creator_role', '')
+    if creator_role == 'stores_admin' and role not in ('picker', 'storeman'):
+        return jsonify({'status': 'error', 'message': 'Stores admin can only add picker or storeman roles'}), 403
+
     try:
         with get_db_context() as conn:
             conn.execute(
@@ -560,7 +564,7 @@ def complete_task(task_id):
                         (p['desc'], p.get('qty', 1), f'PM Task #{task_id}')
                     )
             conn.commit()
-        log_action('Artisan', 'task_completed', f"Task #{task_id} completed")
+        log_action(d.get('completed_by_name', 'Artisan'), 'task_completed', f"Task #{task_id} completed")
         return jsonify({'status': 'ok'})
     except Exception as e:
         logger.error(f"Error completing task {task_id}: {e}", exc_info=True)
@@ -694,6 +698,7 @@ def log_supervisor_breakdown():
         return jsonify({'status': 'error', 'message': 'equipment_id and artisan_id required'}), 400
     try:
         with get_db_context() as conn:
+            auto_time = datetime.now().strftime('%H:%M')
             cur = conn.execute("""
                 INSERT INTO breakdowns
                 (log_date, supervisor_id, artisan_id, equipment_id,
@@ -703,7 +708,7 @@ def log_supervisor_breakdown():
                 VALUES (?,?,?,?,?,?,?,?,?,?,?,'supervisor_logged','live')
             """, (
                 date.today().isoformat(), d.get('supervisor_id'), d.get('artisan_id'),
-                d.get('equipment_id'), d.get('time_start'), d.get('time_end'),
+                d.get('equipment_id'), d.get('time_start') or auto_time, d.get('time_end'),
                 d.get('failure_type'), d.get('component'), d.get('failure_mode'),
                 d.get('supervisor_notes'), d.get('machine_status')
             ))
@@ -776,9 +781,11 @@ def get_my_breakdowns(user_id):
         cutoff = (date.today() - timedelta(days=days)).isoformat()
         with get_db_context() as conn:
             rows = conn.execute("""
-                SELECT b.*, e.name as equip_name, e.area
+                SELECT b.*, e.name as equip_name, e.area,
+                       a.name as artisan_name
                 FROM breakdowns b
                 LEFT JOIN equipment e ON e.id = b.equipment_id
+                LEFT JOIN users a ON a.id = b.artisan_id
                 WHERE b.artisan_id=? AND b.log_date >= ?
                 ORDER BY b.logged_at DESC
             """, (user_id, cutoff)).fetchall()
@@ -811,7 +818,9 @@ def get_disputed_breakdowns():
 
 @app.route('/api/breakdowns/<int:bd_id>/artisan', methods=['POST'])
 def artisan_complete_breakdown(bd_id):
-    """Artisan completes a breakdown."""
+    """Artisan files their breakdown report.
+    If supervisor hasn't completed yet → artisan_completed (waiting for supervisor).
+    If supervisor already completed → compare times, set complete or disputed."""
     d = safe_json(request)
     try:
         with get_db_context() as conn:
@@ -819,44 +828,48 @@ def artisan_complete_breakdown(bd_id):
             if not row:
                 return jsonify({'status': 'error', 'message': 'Breakdown not found'}), 404
             b = dict(row)
-            b['art_time_start'] = d.get('art_time_start')
-            b['art_time_end'] = d.get('art_time_end')
-            downtime = _recalc_downtime(b)
+            sup_done = b.get('status') == 'awaiting_artisan_review'
 
-            # Detect dispute: artisan times differ from supervisor times
             disputed = 0
             dispute_field = None
-            if (d.get('art_time_start') and b.get('sup_time_start') and
-                    d['art_time_start'] != b['sup_time_start']):
-                disputed = 1
-                dispute_field = 'time_start'
-            if (d.get('art_time_end') and b.get('sup_time_end') and
-                    d['art_time_end'] != b['sup_time_end']):
-                disputed = 1
-                dispute_field = (dispute_field + ', time_end') if dispute_field else 'time_end'
+            if sup_done:
+                # Compare artisan times against supervisor's recorded times
+                art_start = d.get('art_time_start', '')
+                art_end   = d.get('art_time_end', '')
+                sup_start = (b.get('sup_time_start') or '')[:5]
+                sup_end   = (b.get('sup_time_end') or '')[:5]
+                if not sup_end:
+                    ct = b.get('sup_completed_at') or ''
+                    sup_end = ct[11:16] if len(ct) > 15 else ''
+                if art_start and sup_start and art_start != sup_start:
+                    disputed = 1; dispute_field = 'time_start'
+                if art_end and sup_end and art_end != sup_end:
+                    disputed = 1
+                    dispute_field = (dispute_field + ', time_end') if dispute_field else 'time_end'
 
-            new_status = 'disputed' if disputed else 'complete'
+            b['art_time_start'] = d.get('art_time_start')
+            b['art_time_end']   = d.get('art_time_end')
+            downtime = _recalc_downtime(b)
+            ftype = d.get('failure_type') or b.get('sup_failure_type')
+            new_status = ('disputed' if disputed else 'complete') if sup_done else 'artisan_completed'
+
             conn.execute("""
                 UPDATE breakdowns SET
-                    art_time_start=?, art_time_end=?, art_description=?,
-                    art_repair_action=?, art_machine_status=?, art_followup=?,
-                    art_failed_component=?, art_failure_mode=?,
+                    art_time_start=?, art_time_end=?, art_failure_type=?,
+                    art_description=?, art_repair_action=?, art_machine_status=?,
+                    art_followup=?, art_failed_component=?, art_failure_mode=?,
                     art_completed_at=?, status=?, disputed=?, dispute_field=?,
                     downtime_mins=?,
                     production_downtime_mins=CASE WHEN ?='Production' THEN ? ELSE 0 END,
                     maintenance_downtime_mins=CASE WHEN ?='Production' THEN 0 ELSE ? END
                 WHERE id=?
             """, (
-                d.get('art_time_start'), d.get('art_time_end'), d.get('description'),
-                d.get('repair_action'), d.get('machine_status'), d.get('followup'),
-                d.get('failed_component'), d.get('failure_mode'),
+                d.get('art_time_start'), d.get('art_time_end'), d.get('failure_type'),
+                d.get('description'), d.get('repair_action'), d.get('machine_status'),
+                d.get('followup'), d.get('failed_component'), d.get('failure_mode'),
                 datetime.now().isoformat(), new_status, disputed, dispute_field,
-                downtime,
-                b.get('sup_failure_type'), downtime,
-                b.get('sup_failure_type'), downtime,
-                bd_id
+                downtime, ftype, downtime, ftype, downtime, bd_id
             ))
-            # parts
             for p in (d.get('parts', []) or []):
                 if p.get('desc'):
                     conn.execute(
@@ -868,8 +881,8 @@ def artisan_complete_breakdown(bd_id):
                         (p['desc'], p.get('qty', 1), f'Breakdown #{bd_id}')
                     )
             conn.commit()
-        log_action('Artisan', 'breakdown_completed', f"Breakdown #{bd_id} ({new_status})")
-        return jsonify({'status': 'ok', 'disputed': bool(disputed)})
+        log_action(d.get('artisan_name', 'Artisan'), 'breakdown_completed', f"Breakdown #{bd_id} ({new_status})")
+        return jsonify({'status': 'ok', 'disputed': bool(disputed), 'new_status': new_status})
     except Exception as e:
         logger.error(f"Error completing breakdown {bd_id}: {e}", exc_info=True)
         return jsonify({'status': 'error', 'message': 'Failed to complete breakdown'}), 500
@@ -877,15 +890,15 @@ def artisan_complete_breakdown(bd_id):
 
 @app.route('/api/breakdowns/<int:bd_id>/resolve', methods=['POST'])
 def resolve_breakdown(bd_id):
-    """Admin resolves a disputed breakdown with final values."""
+    """Admin resolves a disputed breakdown with final values and optional dept allocations."""
     d = safe_json(request)
     try:
         with get_db_context() as conn:
             b = dict(conn.execute("SELECT * FROM breakdowns WHERE id=?", (bd_id,)).fetchone() or {})
-            b['final_time_start'] = d.get('time_start')
-            b['final_time_end'] = d.get('time_end')
+            b['final_time_start'] = d.get('final_time_start')
+            b['final_time_end']   = d.get('final_time_end')
             downtime = _recalc_downtime(b)
-            ftype = d.get('failure_type') or b.get('sup_failure_type')
+            ftype = d.get('final_failure_type') or b.get('sup_failure_type')
             conn.execute("""
                 UPDATE breakdowns SET
                     final_time_start=?, final_time_end=?, final_description=?,
@@ -896,11 +909,20 @@ def resolve_breakdown(bd_id):
                     maintenance_downtime_mins=CASE WHEN ?='Production' THEN 0 ELSE ? END
                 WHERE id=?
             """, (
-                d.get('time_start'), d.get('time_end'), d.get('description'),
-                ftype, d.get('resolved_by'), d.get('note'),
+                d.get('final_time_start'), d.get('final_time_end'), d.get('final_description'),
+                ftype, d.get('admin_id'), d.get('resolution_note'),
                 datetime.now().isoformat(), downtime,
                 ftype, downtime, ftype, downtime, bd_id
             ))
+            # Save dept allocations — replace any existing ones for this breakdown
+            conn.execute("DELETE FROM breakdown_allocations WHERE breakdown_id=?", (bd_id,))
+            for alloc in (d.get('allocations') or []):
+                mins = int(alloc.get('mins') or 0)
+                if alloc.get('dept') and mins > 0:
+                    conn.execute(
+                        "INSERT INTO breakdown_allocations (breakdown_id, dept, mins, note) VALUES (?,?,?,?)",
+                        (bd_id, alloc['dept'], mins, alloc.get('note', ''))
+                    )
             conn.commit()
         log_action('Admin', 'breakdown_resolved', f"Breakdown #{bd_id} resolved")
         return jsonify({'status': 'ok'})
@@ -1428,16 +1450,13 @@ def delete_stock(sid):
 
 @app.route('/api/stores/movement', methods=['POST'])
 def stock_movement():
-    """Issue / receive / adjust / return stock. Issue requires a job number."""
+    """Issue / receive / adjust / return stock."""
     d = safe_json(request)
     sid = d.get('stock_id')
     mtype = d.get('movement_type')
     qty = float(d.get('qty', 0) or 0)
     if not sid or not mtype or qty <= 0:
         return jsonify({'status': 'error', 'message': 'stock_id, movement_type and qty required'}), 400
-    # Issue requires an open job
-    if mtype == 'issue' and not d.get('job_number'):
-        return jsonify({'status': 'error', 'message': 'A job number is required to issue stock'}), 400
     try:
         with get_db_context() as conn:
             row = conn.execute("SELECT qty_on_hand FROM stores_stock WHERE id=?", (sid,)).fetchone()
@@ -1457,7 +1476,7 @@ def stock_movement():
             """, (sid, mtype, qty, new_qty, d.get('job_number'), d.get('reference'),
                   d.get('notes'), d.get('logged_by'), d.get('logged_by_name', 'Stores')))
             conn.commit()
-        return jsonify({'status': 'ok', 'qty_after': new_qty})
+        return jsonify({'status': 'ok', 'new_qty': new_qty})
     except Exception as e:
         logger.error(f"Error recording movement: {e}", exc_info=True)
         return jsonify({'status': 'error', 'message': 'Failed to record movement'}), 500
@@ -1919,19 +1938,62 @@ def get_inactive_equipment():
 # ============================================================
 @app.route('/api/breakdowns/<int:bd_id>/complete-supervisor', methods=['POST'])
 def supervisor_complete_breakdown(bd_id):
-    """Supervisor marks a breakdown as physically resolved.
-    Captures end timestamp automatically. Pushes to artisan review."""
+    """Supervisor completes their side of a breakdown.
+    If artisan hasn't filed yet → awaiting_artisan_review.
+    If artisan already filed (artisan_completed) → compare times → complete or disputed."""
     d = safe_json(request)
     try:
         now = datetime.now().isoformat()
+        end_hhmm = datetime.now().strftime('%H:%M')
         with get_db_context() as conn:
+            row = conn.execute("SELECT * FROM breakdowns WHERE id=?", (bd_id,)).fetchone()
+            if not row:
+                return jsonify({'status': 'error', 'message': 'Not found'}), 404
+            b = dict(row)
+            art_done = b.get('status') == 'artisan_completed'
+
+            disputed = 0
+            dispute_field = None
+            if art_done:
+                art_start = (b.get('art_time_start') or '')[:5]
+                art_end   = (b.get('art_time_end')   or '')[:5]
+                sup_start = (b.get('sup_time_start') or '')[:5]
+                if art_start and sup_start and art_start != sup_start:
+                    disputed = 1; dispute_field = 'time_start'
+                if art_end and end_hhmm and art_end != end_hhmm:
+                    disputed = 1
+                    dispute_field = (dispute_field + ', time_end') if dispute_field else 'time_end'
+
+            new_status = ('disputed' if disputed else 'complete') if art_done else 'awaiting_artisan_review'
+
+            # Recalculate downtime using supervisor's confirmed times
+            b['art_time_start'] = b.get('art_time_start') or b.get('sup_time_start')
+            b['art_time_end']   = end_hhmm
+            downtime = _recalc_downtime(b) if art_done else None
+            ftype = d.get('failure_type') or b.get('art_failure_type') or b.get('sup_failure_type')
+
             conn.execute("""
                 UPDATE breakdowns
-                SET status='awaiting_artisan_review',
+                SET status=?,
                     sup_completed_at=?,
-                    sup_completed_by=?
-                WHERE id=? AND status='supervisor_logged'
-            """, (now, d.get('supervisor_id'), bd_id))
+                    sup_completed_by=?,
+                    sup_time_end=?,
+                    sup_failure_type=COALESCE(NULLIF(?,''), sup_failure_type),
+                    sup_component=COALESCE(NULLIF(?,''), sup_component),
+                    sup_failure_mode=COALESCE(NULLIF(?,''), sup_failure_mode),
+                    sup_notes=COALESCE(NULLIF(?,''), sup_notes),
+                    sup_machine_status=COALESCE(NULLIF(?,''), sup_machine_status),
+                    disputed=?, dispute_field=?,
+                    downtime_mins=COALESCE(?,downtime_mins),
+                    production_downtime_mins=CASE WHEN ?='Production' THEN COALESCE(?,production_downtime_mins) ELSE production_downtime_mins END,
+                    maintenance_downtime_mins=CASE WHEN ?!='Production' THEN COALESCE(?,maintenance_downtime_mins) ELSE maintenance_downtime_mins END
+                WHERE id=? AND status IN ('supervisor_logged','artisan_completed')
+            """, (new_status, now, d.get('supervisor_id'), end_hhmm,
+                  d.get('failure_type'), d.get('component'), d.get('failure_mode'),
+                  d.get('supervisor_notes'), d.get('machine_status'),
+                  disputed, dispute_field,
+                  downtime, ftype, downtime, ftype, downtime,
+                  bd_id))
             conn.commit()
         log_action('Supervisor', 'breakdown_completed_sup',
                    f"Breakdown #{bd_id} marked resolved by supervisor")
@@ -1976,9 +2038,13 @@ def artisan_review_breakdown(bd_id):
             art_start = d.get('art_time_start', '')
             art_end   = d.get('art_time_end', '')
 
-            # Compare against supervisor auto-timestamps (HH:MM format)
-            sup_start = (bd.get('logged_at') or '')[:16].split('T')[-1][:5]
-            sup_end   = (bd.get('sup_completed_at') or '')[:16].split('T')[-1][:5]
+            # Use stored HH:MM fields — avoids datetime format ambiguity
+            sup_start = (bd.get('sup_time_start') or '')[:5]
+            # sup_time_end set by complete-supervisor; fall back to sup_completed_at
+            sup_end = (bd.get('sup_time_end') or '')[:5]
+            if not sup_end:
+                ct = bd.get('sup_completed_at') or ''
+                sup_end = ct[11:16] if 'T' in ct else ct[11:16]
 
             # Detect dispute: artisan changed either time
             disputed = 0
@@ -2008,7 +2074,7 @@ def artisan_review_breakdown(bd_id):
             conn.execute("""
                 UPDATE breakdowns SET
                     art_time_start=?, art_time_end=?,
-                    art_description=?, art_repair_action=?,
+                    art_failure_type=?, art_description=?, art_repair_action=?,
                     art_machine_status=?, art_followup=?,
                     art_failed_component=?, art_failure_mode=?,
                     art_completed_at=?, status=?,
@@ -2018,7 +2084,7 @@ def artisan_review_breakdown(bd_id):
                 WHERE id=?
             """, (
                 art_start, art_end,
-                d.get('description',''), d.get('repair_action',''),
+                d.get('failure_type',''), d.get('description',''), d.get('repair_action',''),
                 d.get('machine_status',''), d.get('followup',''),
                 d.get('failed_component',''), d.get('failure_mode',''),
                 datetime.now().isoformat(), new_status,
@@ -2045,7 +2111,7 @@ def artisan_review_breakdown(bd_id):
                         )
             conn.commit()
 
-        log_action('Artisan', 'breakdown_reviewed',
+        log_action(d.get('artisan_name', 'Artisan'), 'breakdown_reviewed',
                    f"Breakdown #{bd_id} reviewed — {'DISPUTED' if disputed else 'agreed'}")
         return jsonify({'status': 'ok', 'disputed': bool(disputed)})
     except Exception as e:
@@ -2064,7 +2130,7 @@ def get_supervisor_active_breakdowns(supervisor_id):
                 FROM breakdowns b
                 LEFT JOIN equipment e ON e.id = b.equipment_id
                 LEFT JOIN users a ON a.id = b.artisan_id
-                WHERE b.supervisor_id=? AND b.status='supervisor_logged'
+                WHERE b.supervisor_id=? AND b.status IN ('supervisor_logged','artisan_completed')
                 ORDER BY b.logged_at DESC
             """, (supervisor_id,)).fetchall()
         return jsonify([dict(r) for r in rows])
@@ -2272,8 +2338,8 @@ def add_requisition():
     """Create requisition. Only admin/manager/supervisor can create."""
     d = safe_json(request)
     user_role = d.get('user_role')
-    if user_role not in ('admin', 'manager', 'supervisor'):
-        return jsonify({'status': 'error', 'message': 'Only managers and supervisors can create requisitions'}), 403
+    if user_role not in ('admin', 'manager', 'supervisor', 'team_leader'):
+        return jsonify({'status': 'error', 'message': 'Only managers, team leaders and supervisors can create requisitions'}), 403
     items = d.get('items', [])
     if not items:
         return jsonify({'status': 'error', 'message': 'At least one line item is required'}), 400
@@ -2350,37 +2416,132 @@ def get_requisition_detail(pr_id):
 
 @app.route('/api/requisitions/<int:pr_id>/action', methods=['POST'])
 def action_requisition(pr_id):
-    """ONLY stores_admin (Steven) can action/order a requisition."""
+    """ONLY stores_admin (Steven) can action a requisition."""
     d = safe_json(request)
     if d.get('user_role') != 'stores_admin':
         return jsonify({'status': 'error', 'message': 'Only the Stores Admin can action requisitions'}), 403
+    new_status = d.get('new_status', 'ordered')
+    valid_statuses = ['pending_approval', 'pending_quotation', 'ordered', 'declined', 'delivered', 'partially_received']
+    if new_status not in valid_statuses:
+        return jsonify({'status': 'error', 'message': f'Invalid status: {new_status}'}), 400
     try:
         with get_db_context() as conn:
-            conn.execute("""
+            extra_fields = ""
+            extra_vals = []
+            # Auto-generate quote_ref when marking as ordered
+            if new_status == 'ordered':
+                quote_ref = f"QT-{datetime.now().year}-{str(pr_id).zfill(6)}"
+                supplier  = d.get('supplier_name', '').strip() or None
+                extra_fields = ", quote_ref=?, supplier_name=?"
+                extra_vals   = [quote_ref, supplier]
+            conn.execute(f"""
                 UPDATE requisitions
-                SET status='ordered', actioned_by=?, actioned_at=?, action_notes=?
+                SET status=?, actioned_by=?, actioned_at=?, action_notes=?{extra_fields}
                 WHERE id=?
-            """, (d.get('actioned_by'), datetime.now().isoformat(), d.get('notes'), pr_id))
+            """, (new_status, d.get('actioned_by'), datetime.now().isoformat(),
+                  d.get('notes'), *extra_vals, pr_id))
             conn.commit()
-        log_action('Stores Admin', 'requisition_ordered', f"PR #{pr_id} ordered")
-        return jsonify({'status': 'ok'})
+            if new_status == 'ordered':
+                row = conn.execute("SELECT quote_ref FROM requisitions WHERE id=?", (pr_id,)).fetchone()
+                quote_ref = row['quote_ref'] if row else None
+            else:
+                quote_ref = None
+        log_action('Stores Admin', 'requisition_actioned', f"PR #{pr_id} → {new_status}")
+        return jsonify({'status': 'ok', 'quote_ref': quote_ref})
     except Exception as e:
         logger.error(f"Error actioning requisition {pr_id}: {e}", exc_info=True)
         return jsonify({'status': 'error', 'message': 'Failed to action requisition'}), 500
 
 
+@app.route('/api/requisitions/search-by-ref')
+def search_requisition_by_ref():
+    """Search open requisitions by quote_ref, invoice_ref or pr_number. Used by storeman receive screen."""
+    q = (request.args.get('q') or '').strip()
+    if not q:
+        return jsonify([])
+    try:
+        with get_db_context() as conn:
+            rows = conn.execute("""
+                SELECT r.*, e.name as equip_name, u.name as raised_by_name,
+                       (SELECT COUNT(*) FROM requisition_items WHERE requisition_id=r.id) as item_count
+                FROM requisitions r
+                LEFT JOIN equipment e ON e.id = r.equipment_id
+                LEFT JOIN users u ON u.id = r.raised_by
+                WHERE (r.quote_ref LIKE ? OR r.invoice_ref LIKE ? OR r.pr_number LIKE ?)
+                  AND r.status IN ('ordered','partially_received')
+                ORDER BY r.submitted_at DESC LIMIT 10
+            """, (f'%{q}%', f'%{q}%', f'%{q}%')).fetchall()
+        return jsonify([dict(r) for r in rows])
+    except Exception as e:
+        logger.error(f"Error searching requisitions: {e}", exc_info=True)
+        return jsonify([]), 500
+
+
+@app.route('/api/requisitions/<int:pr_id>/receive', methods=['POST'])
+def receive_requisition(pr_id):
+    """Storeman records delivery against a requisition. Updates status and records invoice_ref."""
+    d = safe_json(request)
+    invoice_ref = (d.get('invoice_ref') or '').strip() or None
+    partial     = bool(d.get('partial', False))
+    notes       = d.get('notes') or None
+    try:
+        with get_db_context() as conn:
+            pr = conn.execute("SELECT * FROM requisitions WHERE id=?", (pr_id,)).fetchone()
+            if not pr:
+                return jsonify({'status': 'error', 'message': 'Requisition not found'}), 404
+            new_status = 'partially_received' if partial else 'delivered'
+            conn.execute("""
+                UPDATE requisitions
+                SET status=?, invoice_ref=?, actioned_at=?, action_notes=?
+                WHERE id=?
+            """, (new_status, invoice_ref, datetime.now().isoformat(), notes, pr_id))
+            # Record a stock movement for each item that has a stock_id linked
+            items = conn.execute("""
+                SELECT * FROM requisition_items WHERE requisition_id=?
+            """, (pr_id,)).fetchall()
+            for item in items:
+                if item['stock_id']:
+                    stock_row = conn.execute(
+                        "SELECT qty_on_hand FROM stores_stock WHERE id=?", (item['stock_id'],)
+                    ).fetchone()
+                    if stock_row:
+                        qty_recv = float(d.get(f'qty_{item["id"]}') or item['qty'])
+                        new_qty  = stock_row['qty_on_hand'] + qty_recv
+                        conn.execute("UPDATE stores_stock SET qty_on_hand=? WHERE id=?",
+                                     (new_qty, item['stock_id']))
+                        conn.execute("""
+                            INSERT INTO stock_movements
+                            (stock_id, movement_type, qty, qty_after, reference, notes,
+                             logged_by, logged_by_name, requisition_id)
+                            VALUES (?,?,?,?,?,?,?,?,?)
+                        """, (item['stock_id'], 'receipt', qty_recv, new_qty,
+                              invoice_ref or pr['quote_ref'], notes,
+                              d.get('received_by'), d.get('received_by_name', 'Storeman'), pr_id))
+            conn.commit()
+        log_action(d.get('received_by_name','Storeman'), 'stock_received',
+                   f"PR {pr['pr_number']} → {new_status} (inv: {invoice_ref})")
+        return jsonify({'status': 'ok', 'new_status': new_status})
+    except Exception as e:
+        logger.error(f"Error receiving requisition {pr_id}: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'message': 'Failed to record receipt'}), 500
+
+
 @app.route('/api/requisitions/<int:pr_id>/request-status', methods=['POST'])
 def request_requisition_status(pr_id):
-    """ONLY main admin can request status updates."""
+    """Admin or stores_admin can query/flag a requisition."""
     d = safe_json(request)
-    if d.get('user_role') != 'admin':
-        return jsonify({'status': 'error', 'message': 'Only the main Admin can request status updates'}), 403
+    if d.get('user_role') not in ('admin', 'stores_admin'):
+        return jsonify({'status': 'error', 'message': 'Only Admin or Stores Admin can query requisitions'}), 403
     try:
-        log_action('Admin', 'status_requested', f"Status requested for PR #{pr_id}")
-        return jsonify({'status': 'ok', 'message': 'Status request sent to Stores Admin'})
+        with get_db_context() as conn:
+            conn.execute("UPDATE requisitions SET admin_queried=1 WHERE id=?", (pr_id,))
+            conn.commit()
+        actor = 'Stores Admin' if d.get('user_role') == 'stores_admin' else 'Admin'
+        log_action(actor, 'requisition_queried', f"PR #{pr_id} flagged as queried")
+        return jsonify({'status': 'ok', 'message': 'Requisition flagged as queried'})
     except Exception as e:
-        logger.error(f"Error requesting status: {e}", exc_info=True)
-        return jsonify({'status': 'error', 'message': 'Failed to request status'}), 500
+        logger.error(f"Error querying requisition {pr_id}: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'message': 'Failed to flag requisition'}), 500
 
 
 @app.route('/api/requisitions/<int:pr_id>/status', methods=['POST'])
@@ -2500,6 +2661,474 @@ def requisition_rfq(pr_id):
         return jsonify({'status': 'error', 'message': 'Failed to generate RFQ'}), 500
 
 
+
+
+# ============================================================
+# COMPONENT TRACKING
+# ============================================================
+
+@app.route('/api/component-categories')
+def get_component_categories():
+    try:
+        with get_db_context() as conn:
+            rows = conn.execute(
+                "SELECT * FROM component_categories ORDER BY name"
+            ).fetchall()
+        return jsonify([dict(r) for r in rows])
+    except Exception as e:
+        logger.error(f"Error fetching component categories: {e}", exc_info=True)
+        return jsonify([]), 500
+
+
+@app.route('/api/component-categories', methods=['POST'])
+def add_component_category():
+    d = safe_json(request)
+    name = str(d.get('name', '')).strip()
+    if not name:
+        return jsonify({'status': 'error', 'message': 'name required'}), 400
+    try:
+        with get_db_context() as conn:
+            conn.execute(
+                "INSERT INTO component_categories (name, description, is_wear_item, default_lifetime_days) VALUES (?,?,?,?)",
+                (name, d.get('description'), int(d.get('is_wear_item', 1) or 1), d.get('default_lifetime_days'))
+            )
+            conn.commit()
+        return jsonify({'status': 'ok'})
+    except Exception as e:
+        logger.error(f"Error adding component category: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'message': 'Failed to add category'}), 500
+
+
+@app.route('/api/component-categories/<int:cid>', methods=['DELETE'])
+def delete_component_category(cid):
+    try:
+        with get_db_context() as conn:
+            conn.execute("DELETE FROM component_categories WHERE id=?", (cid,))
+            conn.commit()
+        return jsonify({'status': 'ok'})
+    except Exception as e:
+        logger.error(f"Error deleting component category {cid}: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'message': 'Failed to delete category'}), 500
+
+
+@app.route('/api/equipment/<int:eid>/components')
+def get_equipment_components(eid):
+    try:
+        with get_db_context() as conn:
+            rows = conn.execute("""
+                SELECT ec.*, cc.name as category_name, cc.is_wear_item as cat_is_wear
+                FROM equipment_components ec
+                LEFT JOIN component_categories cc ON cc.id = ec.category_id
+                WHERE ec.equipment_id = ? AND ec.active = 1
+                ORDER BY ec.name
+            """, (eid,)).fetchall()
+        return jsonify([dict(r) for r in rows])
+    except Exception as e:
+        logger.error(f"Error fetching components for equipment {eid}: {e}", exc_info=True)
+        return jsonify([]), 500
+
+
+@app.route('/api/equipment/<int:eid>/components', methods=['POST'])
+def add_equipment_component(eid):
+    d = safe_json(request)
+    name = str(d.get('name', '')).strip()
+    if not name:
+        return jsonify({'status': 'error', 'message': 'Component name required'}), 400
+    try:
+        with get_db_context() as conn:
+            conn.execute("""
+                INSERT INTO equipment_components
+                (equipment_id, category_id, name, location_on_machine, part_number,
+                 is_wear_item, estimated_lifetime_days, condition, created_by)
+                VALUES (?,?,?,?,?,?,?,?,?)
+            """, (
+                eid, d.get('category_id'), name, d.get('location_on_machine'),
+                d.get('part_number'), int(d.get('is_wear_item', 1) or 1),
+                d.get('estimated_lifetime_days'),
+                d.get('condition', 'Unknown'), d.get('created_by')
+            ))
+            conn.commit()
+        return jsonify({'status': 'ok'})
+    except Exception as e:
+        logger.error(f"Error adding component: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'message': 'Failed to add component'}), 500
+
+
+@app.route('/api/components/<int:cid>', methods=['DELETE'])
+def delete_component(cid):
+    try:
+        with get_db_context() as conn:
+            conn.execute("UPDATE equipment_components SET active=0 WHERE id=?", (cid,))
+            conn.commit()
+        return jsonify({'status': 'ok'})
+    except Exception as e:
+        logger.error(f"Error deleting component {cid}: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'message': 'Failed to delete component'}), 500
+
+
+@app.route('/api/components/<int:cid>/assess', methods=['POST'])
+def assess_component(cid):
+    """Record or update a condition assessment. Valid only before first verified replacement."""
+    d = safe_json(request)
+    condition = d.get('condition', 'Unknown')
+    if condition not in ('Unknown', 'New', 'Good', 'Fair', 'Poor', 'Critical'):
+        return jsonify({'status': 'error', 'message': 'Invalid condition value'}), 400
+    try:
+        with get_db_context() as conn:
+            conn.execute("""
+                UPDATE equipment_components SET
+                    condition             = ?,
+                    estimated_age_days    = ?,
+                    estimated_remaining_days = ?,
+                    confidence_level      = ?,
+                    condition_notes       = ?,
+                    assessed_by           = ?,
+                    assessed_by_name      = ?,
+                    assessment_date       = ?
+                WHERE id = ?
+            """, (
+                condition,
+                d.get('estimated_age_days'),
+                d.get('estimated_remaining_days'),
+                d.get('confidence_level'),
+                d.get('notes'),
+                d.get('assessed_by'),
+                d.get('assessed_by_name'),
+                d.get('assessment_date') or datetime.now().strftime('%Y-%m-%d'),
+                cid
+            ))
+            conn.execute("""
+                INSERT INTO component_events
+                (component_id, event_type, event_date, notes, logged_by, logged_by_name)
+                VALUES (?,?,?,?,?,?)
+            """, (
+                cid, 'assessment',
+                d.get('assessment_date') or datetime.now().strftime('%Y-%m-%d'),
+                f"Condition: {condition}. {d.get('notes') or ''}".strip('. '),
+                d.get('assessed_by'), d.get('assessed_by_name')
+            ))
+            conn.commit()
+        return jsonify({'status': 'ok'})
+    except Exception as e:
+        logger.error(f"Error assessing component {cid}: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'message': 'Failed to save assessment'}), 500
+
+
+@app.route('/api/components/<int:cid>/replace', methods=['POST'])
+def log_component_replacement(cid):
+    """Log a verified replacement — resets the heartbeat and becomes authoritative source."""
+    d = safe_json(request)
+    event_date = d.get('event_date') or datetime.now().strftime('%Y-%m-%d')
+    try:
+        with get_db_context() as conn:
+            row = conn.execute(
+                "SELECT replacement_count, failure_count FROM equipment_components WHERE id=?", (cid,)
+            ).fetchone()
+            if not row:
+                return jsonify({'status': 'error', 'message': 'Component not found'}), 404
+            new_count = (row['replacement_count'] or 0) + 1
+            conn.execute("""
+                UPDATE equipment_components SET
+                    condition            = 'New',
+                    installation_date    = ?,
+                    replacement_count    = ?,
+                    last_replacement     = ?,
+                    estimated_age_days   = 0,
+                    estimated_remaining_days = estimated_lifetime_days,
+                    condition_notes      = NULL,
+                    assessed_by          = NULL,
+                    assessed_by_name     = NULL,
+                    assessment_date      = NULL
+                WHERE id = ?
+            """, (event_date, new_count, event_date, cid))
+            conn.execute("""
+                INSERT INTO component_events
+                (component_id, event_type, event_date, work_order_ref, part_number, supplier, notes, logged_by, logged_by_name)
+                VALUES (?,?,?,?,?,?,?,?,?)
+            """, (
+                cid, 'replacement', event_date,
+                d.get('work_order_ref'), d.get('part_number'), d.get('supplier'),
+                d.get('notes'), d.get('logged_by'), d.get('logged_by_name')
+            ))
+            conn.commit()
+        return jsonify({'status': 'ok'})
+    except Exception as e:
+        logger.error(f"Error logging replacement for component {cid}: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'message': 'Failed to log replacement'}), 500
+
+
+@app.route('/api/components/<int:cid>/failure', methods=['POST'])
+def log_component_failure(cid):
+    """Log a component failure event."""
+    d = safe_json(request)
+    event_date = d.get('event_date') or datetime.now().strftime('%Y-%m-%d')
+    try:
+        with get_db_context() as conn:
+            row = conn.execute(
+                "SELECT failure_count FROM equipment_components WHERE id=?", (cid,)
+            ).fetchone()
+            if not row:
+                return jsonify({'status': 'error', 'message': 'Component not found'}), 404
+            new_count = (row['failure_count'] or 0) + 1
+            conn.execute("""
+                UPDATE equipment_components SET
+                    condition      = 'Critical',
+                    failure_count  = ?,
+                    last_failure   = ?
+                WHERE id = ?
+            """, (new_count, event_date, cid))
+            conn.execute("""
+                INSERT INTO component_events
+                (component_id, event_type, event_date, work_order_ref, notes, logged_by, logged_by_name)
+                VALUES (?,?,?,?,?,?,?)
+            """, (
+                cid, 'failure', event_date,
+                d.get('work_order_ref'), d.get('notes'),
+                d.get('logged_by'), d.get('logged_by_name')
+            ))
+            conn.commit()
+        return jsonify({'status': 'ok'})
+    except Exception as e:
+        logger.error(f"Error logging failure for component {cid}: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'message': 'Failed to log failure'}), 500
+
+
+@app.route('/api/components/<int:cid>/history')
+def get_component_history(cid):
+    try:
+        with get_db_context() as conn:
+            rows = conn.execute("""
+                SELECT * FROM component_events
+                WHERE component_id = ?
+                ORDER BY logged_at DESC
+            """, (cid,)).fetchall()
+        return jsonify([dict(r) for r in rows])
+    except Exception as e:
+        logger.error(f"Error fetching component history {cid}: {e}", exc_info=True)
+        return jsonify([]), 500
+
+
+@app.route('/api/components/all')
+def get_all_components():
+    """Return all active components across all equipment, for dashboards."""
+    try:
+        with get_db_context() as conn:
+            rows = conn.execute("""
+                SELECT ec.*, cc.name as category_name, e.name as equipment_name, e.area
+                FROM equipment_components ec
+                LEFT JOIN component_categories cc ON cc.id = ec.category_id
+                LEFT JOIN equipment e ON e.id = ec.equipment_id
+                WHERE ec.active = 1
+                ORDER BY e.name, ec.name
+            """).fetchall()
+        return jsonify([dict(r) for r in rows])
+    except Exception as e:
+        logger.error(f"Error fetching all components: {e}", exc_info=True)
+        return jsonify([]), 500
+
+
+# ---- Plant Hierarchy (Phase 2) ----
+
+def _seed_plant_hierarchy(conn):
+    """Seed dept→machine tree from equipment.dept when plant_nodes is empty.
+    Uses the human-readable dept field (Wetmill, Drymill, Kilns, etc.).
+    Called automatically the first time the hierarchy API is queried.
+    """
+    depts = conn.execute(
+        "SELECT DISTINCT dept FROM equipment WHERE active=1 ORDER BY dept"
+    ).fetchall()
+    for row in depts:
+        dept_name = row['dept'] or 'General'
+        conn.execute(
+            "INSERT INTO plant_nodes (parent_id, name, label) VALUES (NULL,?,?)",
+            (dept_name, dept_name)
+        )
+        dept_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        conn.execute(
+            "INSERT OR IGNORE INTO plant_node_ancestors "
+            "(ancestor_id, descendant_id, depth) VALUES (?,?,0)",
+            (dept_id, dept_id)
+        )
+        machines = conn.execute(
+            "SELECT id, name, compound_id, equipment_id FROM equipment "
+            "WHERE dept=? AND active=1 ORDER BY name",
+            (dept_name,)
+        ).fetchall()
+        for m in machines:
+            cid = m['compound_id'] or m['equipment_id'] or ''
+            conn.execute(
+                "INSERT INTO plant_nodes (parent_id, name, equipment_id) VALUES (?,?,?)",
+                (dept_id, m['name'], cid)
+            )
+            leaf_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+            conn.execute(
+                "INSERT OR IGNORE INTO plant_node_ancestors "
+                "(ancestor_id, descendant_id, depth) VALUES (?,?,0)",
+                (leaf_id, leaf_id)
+            )
+            conn.execute("""
+                INSERT INTO plant_node_ancestors (ancestor_id, descendant_id, depth)
+                SELECT ancestor_id, ?, depth + 1
+                FROM plant_node_ancestors WHERE descendant_id = ?
+            """, (leaf_id, dept_id))
+            conn.execute(
+                "UPDATE equipment SET node_id=? WHERE id=?",
+                (leaf_id, m['id'])
+            )
+    conn.commit()
+
+
+@app.route('/api/plant/nodes')
+def api_plant_roots():
+    """Return top-level plant nodes. Auto-seeds from equipment areas on first call."""
+    try:
+        with get_db_context() as conn:
+            count = conn.execute("SELECT COUNT(*) FROM plant_nodes").fetchone()[0]
+            if count == 0:
+                _seed_plant_hierarchy(conn)
+            rows = conn.execute("""
+                SELECT n.*,
+                       (SELECT COUNT(*) FROM plant_nodes c
+                        WHERE c.parent_id = n.id AND c.active=1) AS child_count
+                FROM plant_nodes n
+                WHERE n.parent_id IS NULL AND n.active=1
+                ORDER BY n.sort_order, n.name
+            """).fetchall()
+            return jsonify([dict(r) for r in rows])
+    except Exception as e:
+        logger.error(f"api_plant_roots error: {e}", exc_info=True)
+        return jsonify([]), 500
+
+
+@app.route('/api/plant/nodes/<int:node_id>/children')
+def api_plant_children(node_id):
+    """Return direct children of a plant node, each with child_count and equipment info."""
+    try:
+        with get_db_context() as conn:
+            rows = conn.execute("""
+                SELECT n.*,
+                       (SELECT COUNT(*) FROM plant_nodes c
+                        WHERE c.parent_id = n.id AND c.active=1) AS child_count,
+                       e.id AS db_equip_id, e.area, e.criticality, e.planned_hrs_day
+                FROM plant_nodes n
+                LEFT JOIN equipment e ON e.equipment_id = n.equipment_id AND e.active=1
+                WHERE n.parent_id = ? AND n.active=1
+                ORDER BY n.sort_order, n.name
+            """, (node_id,)).fetchall()
+            return jsonify([dict(r) for r in rows])
+    except Exception as e:
+        logger.error(f"api_plant_children error: {e}", exc_info=True)
+        return jsonify([]), 500
+
+
+@app.route('/api/plant/nodes/<int:node_id>/breadcrumb')
+def api_plant_breadcrumb(node_id):
+    """Return the full path from root to node_id, ordered root-first."""
+    try:
+        from database import get_node_breadcrumb
+        return jsonify(get_node_breadcrumb(node_id))
+    except Exception as e:
+        logger.error(f"api_plant_breadcrumb error: {e}", exc_info=True)
+        return jsonify([]), 500
+
+
+@app.route('/api/plant/nodes', methods=['POST'])
+def api_plant_add_node():
+    """Add a new plant node. Admin only."""
+    if not session.get('user') or session['user'].get('role') != 'admin':
+        return jsonify({'error': 'Admin only'}), 403
+    try:
+        d = request.get_json() or {}
+        name = (d.get('name') or '').strip()
+        if not name:
+            return jsonify({'error': 'name required'}), 400
+        from database import add_plant_node
+        new_id = add_plant_node(
+            parent_id=d.get('parent_id'),
+            name=name,
+            label=d.get('label'),
+            equipment_id=d.get('equipment_id') or None,
+            notes=d.get('notes')
+        )
+        return jsonify({'id': new_id})
+    except Exception as e:
+        logger.error(f"api_plant_add_node error: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/plant/nodes/<int:node_id>/move', methods=['PUT'])
+def api_plant_move_node(node_id):
+    """Move a plant node (and its subtree) to a new parent. Admin only."""
+    if not session.get('user') or session['user'].get('role') != 'admin':
+        return jsonify({'error': 'Admin only'}), 403
+    try:
+        d = request.get_json() or {}
+        new_parent_id = d.get('parent_id')  # None = move to root
+        from database import move_node
+        ok = move_node(node_id, new_parent_id)
+        return jsonify({'ok': ok})
+    except Exception as e:
+        logger.error(f"api_plant_move_node error: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/plant/by-equipment/<int:equip_db_id>')
+def api_plant_by_equipment(equip_db_id):
+    """Return the plant_node that is currently linked to an equipment row, if any."""
+    try:
+        with get_db_context() as conn:
+            row = conn.execute(
+                "SELECT pn.* FROM plant_nodes pn "
+                "JOIN equipment e ON e.node_id = pn.id "
+                "WHERE e.id = ? AND pn.active = 1",
+                (equip_db_id,)
+            ).fetchone()
+            return jsonify(dict(row) if row else {})
+    except Exception as e:
+        logger.error(f"api_plant_by_equipment error: {e}", exc_info=True)
+        return jsonify({}), 500
+
+
+@app.route('/api/plant/nodes/<int:node_id>', methods=['PATCH'])
+def api_plant_patch_node(node_id):
+    """Rename a plant node or update its label. Admin only."""
+    if not session.get('user') or session['user'].get('role') != 'admin':
+        return jsonify({'error': 'Admin only'}), 403
+    try:
+        d = request.get_json() or {}
+        with get_db_context() as conn:
+            if 'name' in d:
+                conn.execute(
+                    "UPDATE plant_nodes SET name=? WHERE id=?",
+                    (d['name'].strip(), node_id)
+                )
+            if 'label' in d:
+                conn.execute(
+                    "UPDATE plant_nodes SET label=? WHERE id=?",
+                    (d.get('label'), node_id)
+                )
+            conn.commit()
+        return jsonify({'ok': True})
+    except Exception as e:
+        logger.error(f"api_plant_patch_node error: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/plant/nodes/<int:node_id>', methods=['DELETE'])
+def api_plant_delete_node(node_id):
+    """Deactivate a plant node (soft-delete). Admin only."""
+    if not session.get('user') or session['user'].get('role') != 'admin':
+        return jsonify({'error': 'Admin only'}), 403
+    try:
+        with get_db_context() as conn:
+            conn.execute(
+                "UPDATE plant_nodes SET active=0 WHERE id=?", (node_id,)
+            )
+            conn.commit()
+        return jsonify({'ok': True})
+    except Exception as e:
+        logger.error(f"api_plant_delete_node error: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
 
 
 # ---- Background Scheduler ----

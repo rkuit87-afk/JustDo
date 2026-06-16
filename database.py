@@ -158,6 +158,15 @@ def init_db():
             logged_by TEXT DEFAULT 'artisan'
         )''')
 
+        c.execute('''CREATE TABLE IF NOT EXISTS breakdown_allocations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            breakdown_id INTEGER REFERENCES breakdowns(id),
+            dept TEXT NOT NULL,
+            mins INTEGER NOT NULL,
+            note TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )''')
+
         c.execute('''CREATE TABLE IF NOT EXISTS reorder (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             part_desc TEXT NOT NULL,
@@ -406,6 +415,89 @@ def init_db():
             updated_at       DATETIME DEFAULT CURRENT_TIMESTAMP
         )''')
 
+        # ============================================================
+        # COMPONENT TRACKING (plugin)
+        # ============================================================
+        c.execute('''CREATE TABLE IF NOT EXISTS component_categories (
+            id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+            name                 TEXT NOT NULL UNIQUE,
+            description          TEXT,
+            is_wear_item         INTEGER DEFAULT 1,
+            default_lifetime_days INTEGER,
+            created_at           DATETIME DEFAULT CURRENT_TIMESTAMP
+        )''')
+
+        c.execute('''CREATE TABLE IF NOT EXISTS equipment_components (
+            id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+            equipment_id            INTEGER REFERENCES equipment(id),
+            category_id             INTEGER REFERENCES component_categories(id),
+            name                    TEXT NOT NULL,
+            location_on_machine     TEXT,
+            part_number             TEXT,
+            is_wear_item            INTEGER DEFAULT 1,
+            estimated_lifetime_days INTEGER,
+            condition               TEXT DEFAULT 'Unknown',
+            estimated_age_days      INTEGER,
+            estimated_remaining_days INTEGER,
+            confidence_level        TEXT,
+            condition_notes         TEXT,
+            assessed_by             INTEGER REFERENCES users(id),
+            assessed_by_name        TEXT,
+            assessment_date         TEXT,
+            installation_date       TEXT,
+            replacement_count       INTEGER DEFAULT 0,
+            failure_count           INTEGER DEFAULT 0,
+            last_replacement        TEXT,
+            last_failure            TEXT,
+            active                  INTEGER DEFAULT 1,
+            created_by              INTEGER REFERENCES users(id),
+            created_at              DATETIME DEFAULT CURRENT_TIMESTAMP
+        )''')
+
+        c.execute('''CREATE TABLE IF NOT EXISTS component_events (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            component_id   INTEGER REFERENCES equipment_components(id),
+            event_type     TEXT NOT NULL,
+            event_date     TEXT,
+            work_order_ref TEXT,
+            part_number    TEXT,
+            supplier       TEXT,
+            notes          TEXT,
+            logged_by      INTEGER REFERENCES users(id),
+            logged_by_name TEXT,
+            logged_at      DATETIME DEFAULT CURRENT_TIMESTAMP
+        )''')
+
+        # ============================================================
+        # EQUIPMENT HIERARCHY (Phase 1)
+        # ============================================================
+        c.execute('''CREATE TABLE IF NOT EXISTS plant_nodes (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            parent_id  INTEGER REFERENCES plant_nodes(id),
+            name       TEXT NOT NULL,
+            label      TEXT,
+            sort_order INTEGER DEFAULT 0,
+            active     INTEGER DEFAULT 1,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            notes      TEXT
+        )''')
+
+        c.execute('''CREATE TABLE IF NOT EXISTS plant_node_ancestors (
+            ancestor_id   INTEGER NOT NULL REFERENCES plant_nodes(id),
+            descendant_id INTEGER NOT NULL REFERENCES plant_nodes(id),
+            depth         INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (ancestor_id, descendant_id)
+        )''')
+
+        # Records equipment IDs that could not be auto-parsed during migration
+        c.execute('''CREATE TABLE IF NOT EXISTS migration_log (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            equipment_id TEXT,
+            reason       TEXT,
+            created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+            resolved     INTEGER DEFAULT 0
+        )''')
+
         conn.commit()
         logger.info("Database schema initialized")
 
@@ -453,6 +545,17 @@ def _run_migrations():
         ("users",           "can_requisition",               "ALTER TABLE users ADD COLUMN can_requisition INTEGER DEFAULT 0"),
         ("users",           "stores_access",                 "ALTER TABLE users ADD COLUMN stores_access INTEGER DEFAULT 0"),
         ("users",           "create_scope",                  "ALTER TABLE users ADD COLUMN create_scope TEXT"),
+        ("requisitions",    "admin_queried",                  "ALTER TABLE requisitions ADD COLUMN admin_queried INTEGER DEFAULT 0"),
+        ("requisitions",    "quote_ref",                      "ALTER TABLE requisitions ADD COLUMN quote_ref TEXT"),
+        ("requisitions",    "invoice_ref",                    "ALTER TABLE requisitions ADD COLUMN invoice_ref TEXT"),
+        ("requisitions",    "supplier_name",                  "ALTER TABLE requisitions ADD COLUMN supplier_name TEXT"),
+        ("stock_movements", "requisition_id",                 "ALTER TABLE stock_movements ADD COLUMN requisition_id INTEGER REFERENCES requisitions(id)"),
+        # v10.2 — equipment hierarchy (Phase 1)
+        ("equipment",       "node_id",                       "ALTER TABLE equipment ADD COLUMN node_id INTEGER"),
+        ("plant_nodes",     "equipment_id",                  "ALTER TABLE plant_nodes ADD COLUMN equipment_id TEXT"),
+        # v10.2 — artisan failure type for full cross-party comparison
+        ("breakdowns",      "art_failure_type",              "ALTER TABLE breakdowns ADD COLUMN art_failure_type TEXT"),
+        ("breakdowns",      "sup_time_end",                  "ALTER TABLE breakdowns ADD COLUMN sup_time_end TEXT"),
     ]
 
     with get_db_context() as conn:
@@ -500,7 +603,8 @@ def _add_indexes():
         ("idx_users_active", "users", "active"),
         ("idx_breakdowns_sup_completed", "breakdowns", "sup_completed_at"),
         ("idx_areas_active", "areas", "active"),
-
+        ("idx_plant_node_ancestors_desc", "plant_node_ancestors", "descendant_id"),
+        ("idx_plant_nodes_parent_id",     "plant_nodes",          "parent_id"),
     ]
 
     with get_db_context() as conn:
@@ -710,6 +814,337 @@ def _seed_suppliers():
                 ]
             )
             conn.commit()
+
+# ============================================================
+# EQUIPMENT HIERARCHY HELPERS (Phase 1)
+# ============================================================
+
+def add_plant_node(parent_id, name, label=None, equipment_id=None, notes=None):
+    """Add a node to the plant hierarchy and update the closure table.
+
+    parent_id=None creates a root node.
+    equipment_id links this leaf node to the equipment register (leaf nodes only).
+    When equipment_id is provided, equipment.node_id is also updated on that row.
+    Returns the new node's integer id.
+    """
+    with get_db_context() as conn:
+        conn.execute(
+            "INSERT INTO plant_nodes (parent_id, name, label, equipment_id, notes) "
+            "VALUES (?,?,?,?,?)",
+            (parent_id, name, label, equipment_id, notes)
+        )
+        new_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+
+        # Every node is its own descendant at depth 0
+        conn.execute(
+            "INSERT INTO plant_node_ancestors (ancestor_id, descendant_id, depth) "
+            "VALUES (?,?,0)",
+            (new_id, new_id)
+        )
+
+        # Inherit all ancestors of the parent, each one level deeper
+        if parent_id is not None:
+            conn.execute("""
+                INSERT INTO plant_node_ancestors (ancestor_id, descendant_id, depth)
+                SELECT ancestor_id, ?, depth + 1
+                FROM plant_node_ancestors
+                WHERE descendant_id = ?
+            """, (new_id, parent_id))
+
+        # Link from the equipment side as well
+        if equipment_id is not None:
+            conn.execute(
+                "UPDATE equipment SET node_id=? WHERE equipment_id=?",
+                (new_id, equipment_id)
+            )
+
+        conn.commit()
+        return new_id
+
+
+def get_node_children(node_id):
+    """Return direct children of node_id, each with a child_count.
+
+    child_count lets the UI show an expand arrow without a second query per row.
+    equipment_id is populated only on leaf nodes that represent a trackable asset.
+    """
+    with get_db_context() as conn:
+        rows = conn.execute("""
+            SELECT n.*,
+                   (SELECT COUNT(*) FROM plant_nodes c
+                    WHERE c.parent_id = n.id AND c.active = 1) AS child_count
+            FROM plant_nodes n
+            WHERE n.parent_id = ? AND n.active = 1
+            ORDER BY n.sort_order, n.name
+        """, (node_id,)).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_node_breadcrumb(node_id):
+    """Return the full path from root down to node_id as an ordered list.
+
+    Ordered root-first: [Wetmill, Romeo, Saw Heads, Head 1, Motor].
+    Uses the closure table — one fast query regardless of tree depth.
+    """
+    with get_db_context() as conn:
+        rows = conn.execute("""
+            SELECT n.id, n.name, n.label, n.equipment_id, a.depth
+            FROM plant_nodes n
+            JOIN plant_node_ancestors a ON a.ancestor_id = n.id
+            WHERE a.descendant_id = ?
+            ORDER BY a.depth DESC
+        """, (node_id,)).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_node_ancestors(node_id):
+    """Return all ancestor node ids of node_id, excluding the node itself.
+
+    Ordered from immediate parent up to root. Used for permission checks
+    and subtree queries.
+    """
+    with get_db_context() as conn:
+        rows = conn.execute("""
+            SELECT ancestor_id
+            FROM plant_node_ancestors
+            WHERE descendant_id = ? AND depth > 0
+            ORDER BY depth ASC
+        """, (node_id,)).fetchall()
+        return [r['ancestor_id'] for r in rows]
+
+
+def get_equipment_node(equipment_id):
+    """Return the plant_node record for a given equipment_id, plus its full breadcrumb.
+
+    Returns a dict with keys: node (the plant_nodes row) and breadcrumb (root → node list).
+    Returns None if this equipment has not been placed in the hierarchy yet.
+    Used by breakdown forms and PM forms to show equipment context.
+    """
+    with get_db_context() as conn:
+        node = conn.execute(
+            "SELECT * FROM plant_nodes WHERE equipment_id=? AND active=1",
+            (equipment_id,)
+        ).fetchone()
+        if not node:
+            return None
+        breadcrumb = get_node_breadcrumb(node['id'])
+        return {'node': dict(node), 'breadcrumb': breadcrumb}
+
+
+def move_node(node_id, new_parent_id):
+    """Move a node and its entire subtree to a new parent.
+
+    Updates plant_node_ancestors correctly for every node in the moved subtree.
+    Validates that new_parent_id exists and is not inside the subtree being moved
+    (you cannot move a folder into itself).
+    Returns True on success, False if validation fails.
+    """
+    with get_db_context() as conn:
+        # Validate new parent exists
+        if new_parent_id is not None:
+            exists = conn.execute(
+                "SELECT id FROM plant_nodes WHERE id=? AND active=1",
+                (new_parent_id,)
+            ).fetchone()
+            if not exists:
+                logger.error(f"move_node: new_parent_id {new_parent_id} not found")
+                return False
+            # Cannot move into own subtree
+            is_own_descendant = conn.execute(
+                "SELECT 1 FROM plant_node_ancestors "
+                "WHERE ancestor_id=? AND descendant_id=?",
+                (node_id, new_parent_id)
+            ).fetchone()
+            if is_own_descendant:
+                logger.error(f"move_node: cannot move node {node_id} into its own subtree")
+                return False
+
+        # Standard closure table subtree move:
+        # Step 1 — delete all links from ancestors-outside-the-subtree
+        #           to nodes-inside-the-subtree
+        conn.execute("""
+            DELETE FROM plant_node_ancestors
+            WHERE descendant_id IN (
+                SELECT descendant_id FROM plant_node_ancestors WHERE ancestor_id = ?
+            )
+            AND ancestor_id NOT IN (
+                SELECT descendant_id FROM plant_node_ancestors WHERE ancestor_id = ?
+            )
+        """, (node_id, node_id))
+
+        # Step 2 — update parent_id on the moved node
+        conn.execute(
+            "UPDATE plant_nodes SET parent_id=? WHERE id=?",
+            (new_parent_id, node_id)
+        )
+
+        # Step 3 — re-insert links from new parent's ancestors to every node
+        #           in the moved subtree
+        if new_parent_id is not None:
+            conn.execute("""
+                INSERT OR IGNORE INTO plant_node_ancestors
+                    (ancestor_id, descendant_id, depth)
+                SELECT p.ancestor_id, s.descendant_id, p.depth + s.depth + 1
+                FROM plant_node_ancestors p
+                CROSS JOIN plant_node_ancestors s
+                WHERE p.descendant_id = ?
+                  AND s.ancestor_id   = ?
+            """, (new_parent_id, node_id))
+
+        conn.commit()
+        return True
+
+
+def parse_compound_id(compound_id):
+    """Try to split a compound equipment ID into meaningful hierarchy segments.
+
+    Expects a pure dash-separated hierarchical code like WM-ROM-SH1-MOT-001.
+    Returns a list of segment strings on success.
+    Returns None (and does NOT raise) if the format looks like a dual-reference
+    code (e.g. 'BDS-001 - BE-004') or cannot be confidently parsed.
+
+    Examples:
+        'WM-ROM-SH1-MOT-001'  → ['WM', 'ROM', 'SH1', 'MOT', '001']
+        'BDS-001 - BE-004'    → None   (dual-reference, not hierarchical)
+        'BLR-001'             → None   (too short to imply a path)
+    """
+    import re
+    if not compound_id:
+        return None
+    cid = compound_id.strip()
+
+    # Dual-reference format contains ' - ' — not a hierarchical path
+    if ' - ' in cid:
+        return None
+
+    parts = cid.split('-')
+    # Need at least 3 segments to imply a meaningful path
+    if len(parts) < 3:
+        return None
+
+    # Last segment should be a numeric sequence (001, 002 …)
+    if not re.match(r'^\d+$', parts[-1]):
+        return None
+
+    # All non-numeric segments must look like short uppercase codes
+    for p in parts[:-1]:
+        if not re.match(r'^[A-Z][A-Z0-9]{0,5}$', p):
+            return None
+
+    return parts
+
+
+def migrate_existing_equipment():
+    """Best-effort, idempotent migration: link equipment records into the hierarchy.
+
+    For each unlinked equipment record:
+    - If compound_id parses cleanly → builds plant_nodes path and links equipment.node_id
+    - If compound_id cannot be parsed → writes to migration_log, leaves node_id NULL
+
+    Safe to call multiple times — skips records where node_id is already set.
+    Prints a plain-English summary on completion.
+    """
+    placed = 0
+    flagged = 0
+
+    with get_db_context() as conn:
+        records = conn.execute(
+            "SELECT id, equipment_id, compound_id, name, area "
+            "FROM equipment WHERE node_id IS NULL AND active=1"
+        ).fetchall()
+
+        if not records:
+            msg = "migrate_existing_equipment: all equipment already linked"
+            logger.info(msg)
+            print(msg)
+            return
+
+        # Cache (parent_id, name) → node_id to avoid duplicate navigation nodes
+        node_cache = {}
+
+        def get_or_create_nav_node(parent_id, seg_name):
+            """Return existing nav node id or create a new one."""
+            key = (parent_id, seg_name)
+            if key in node_cache:
+                return node_cache[key]
+            existing = conn.execute(
+                "SELECT id FROM plant_nodes WHERE parent_id IS ? AND name=? "
+                "AND equipment_id IS NULL",
+                (parent_id, seg_name)
+            ).fetchone()
+            if existing:
+                node_cache[key] = existing['id']
+                return existing['id']
+            conn.execute(
+                "INSERT INTO plant_nodes (parent_id, name) VALUES (?,?)",
+                (parent_id, seg_name)
+            )
+            nid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+            conn.execute(
+                "INSERT OR IGNORE INTO plant_node_ancestors "
+                "(ancestor_id, descendant_id, depth) VALUES (?,?,0)",
+                (nid, nid)
+            )
+            if parent_id is not None:
+                conn.execute("""
+                    INSERT INTO plant_node_ancestors (ancestor_id, descendant_id, depth)
+                    SELECT ancestor_id, ?, depth + 1
+                    FROM plant_node_ancestors WHERE descendant_id = ?
+                """, (nid, parent_id))
+            conn.commit()
+            node_cache[key] = nid
+            return nid
+
+        for rec in records:
+            cid = rec['compound_id'] or rec['equipment_id'] or ''
+            segments = parse_compound_id(cid)
+
+            if segments is None:
+                conn.execute(
+                    "INSERT INTO migration_log (equipment_id, reason) VALUES (?,?)",
+                    (cid,
+                     f"'{cid}' does not follow the parseable hierarchy format "
+                     f"(expected e.g. WM-ROM-SH1-MOT-001). Place manually via admin UI.")
+                )
+                conn.commit()
+                flagged += 1
+                continue
+
+            # Build navigation nodes for all segments except the last (sequence number)
+            parent_id = None
+            for seg in segments[:-1]:
+                parent_id = get_or_create_nav_node(parent_id, seg)
+
+            # Create the leaf node linked to this equipment record
+            conn.execute(
+                "INSERT INTO plant_nodes (parent_id, name, equipment_id) VALUES (?,?,?)",
+                (parent_id, rec['name'], cid)
+            )
+            leaf_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+            conn.execute(
+                "INSERT OR IGNORE INTO plant_node_ancestors "
+                "(ancestor_id, descendant_id, depth) VALUES (?,?,0)",
+                (leaf_id, leaf_id)
+            )
+            if parent_id is not None:
+                conn.execute("""
+                    INSERT INTO plant_node_ancestors (ancestor_id, descendant_id, depth)
+                    SELECT ancestor_id, ?, depth + 1
+                    FROM plant_node_ancestors WHERE descendant_id = ?
+                """, (leaf_id, parent_id))
+
+            conn.execute(
+                "UPDATE equipment SET node_id=? WHERE id=?",
+                (leaf_id, rec['id'])
+            )
+            conn.commit()
+            placed += 1
+
+    print(f"Successfully placed: {placed} equipment records")
+    if flagged:
+        print(f"Flagged for review: {flagged} equipment records — see migration_log table")
+    logger.info(f"migrate_existing_equipment: placed={placed}, flagged={flagged}")
+
 
 if __name__ == '__main__':
     # Setup logging for standalone execution

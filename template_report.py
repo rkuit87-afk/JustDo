@@ -130,7 +130,7 @@ def generate_template_report(year, month):
         # F=Start, G=End, I=Failure Type, K=Component, L=Failure Mode, Q=Comments
         
         ws_dd.cell(row=row, column=1).value  = b['log_date']
-        ws_dd.cell(row=row, column=2).value  = 'Wetmill'  # department (hardcoded for now)
+        ws_dd.cell(row=row, column=2).value  = b.get('area') or 'Wetmill'
         ws_dd.cell(row=row, column=3).value  = compound
         ws_dd.cell(row=row, column=4).value  = b['equip_name'] or compound.split(' - ')[-1]
         ws_dd.cell(row=row, column=5).value  = (b['art_description'] or
@@ -168,7 +168,7 @@ def generate_template_report(year, month):
             FROM boiler_readings br
             LEFT JOIN equipment e ON e.id = br.boiler_id
             WHERE br.log_date BETWEEN ? AND ?
-            ORDER BY br.log_date
+            ORDER BY br.log_date, e.name
         """, (start, end)).fetchall()
 
         # Group by date
@@ -227,7 +227,7 @@ def generate_template_report(year, month):
             SELECT ur.*, e.name as equip_name, e.compound_id
             FROM utility_readings ur
             JOIN equipment e ON e.id = ur.substation_id
-            WHERE e.name LIKE '%Generator%' OR e.name LIKE '%Gen%'
+            WHERE (e.name LIKE '%Generator%' OR e.name LIKE '%Gen%')
             AND ur.log_date BETWEEN ? AND ?
             ORDER BY ur.log_date, e.name
         """, (start, end)).fetchall()

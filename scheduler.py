@@ -13,36 +13,63 @@ def get_week_start(d=None):
     d = d or date.today()
     return d - timedelta(days=d.weekday())
 
+# Minimum weeks between generations per frequency label
+_FREQ_WEEKS = {
+    'weekly': 1,
+    '2weekly': 2, 'biweekly': 2,
+    '3weekly': 3,
+    'monthly': 4, '4weekly': 4,
+    'quarterly': 13, '3monthly': 13,
+    '6monthly': 26, 'semiannual': 26,
+    'annual': 52, 'yearly': 52,
+}
+
+def _due_this_week(sched, week_start_date):
+    """Return True if this schedule should generate a task this week."""
+    freq = (sched['frequency'] or 'weekly').lower().strip()
+    min_weeks = _FREQ_WEEKS.get(freq, 1)
+    last = sched['last_generated']
+    if not last:
+        return True
+    try:
+        last_date = date.fromisoformat(last)
+        return (week_start_date - last_date).days >= (min_weeks * 7)
+    except Exception:
+        return True
+
 def generate_weekly_tasks():
-    """Generate PM tasks for the current week."""
+    """Generate PM tasks for the current week, respecting each schedule's frequency."""
     try:
         logger.info("Generating weekly PM tasks...")
-        
+
         with get_db_context() as conn:
-            week_start = get_week_start().isoformat()
-            
-            # Check if tasks already generated for this week
-            existing = conn.execute(
-                "SELECT COUNT(*) as count FROM pm_tasks WHERE week_start=?",
-                (week_start,)
-            ).fetchone()
-            
-            if existing and existing['count'] > 0:
-                logger.info(f"Tasks already generated for week {week_start}")
-                return
-            
+            week_start = get_week_start()
+            week_start_iso = week_start.isoformat()
+
             # Get all active PM schedules
             schedules = conn.execute(
                 "SELECT * FROM pm_schedule WHERE active=1"
             ).fetchall()
-            
+
             tasks_created = 0
             for sched in schedules:
                 try:
+                    # Skip if not due this week based on frequency
+                    if not _due_this_week(sched, week_start):
+                        continue
+
+                    # Skip if already generated for this week
+                    already = conn.execute(
+                        "SELECT id FROM pm_tasks WHERE schedule_id=? AND week_start=?",
+                        (sched['id'], week_start_iso)
+                    ).fetchone()
+                    if already:
+                        continue
+
                     # Create task from schedule
                     conn.execute("""
-                        INSERT INTO pm_tasks 
-                        (schedule_id, title, equipment_id, assigned_to, week_start, 
+                        INSERT INTO pm_tasks
+                        (schedule_id, title, equipment_id, assigned_to, week_start,
                          due_date, status, task_type)
                         VALUES (?, ?, ?, ?, ?, ?, 'pending', 'pm')
                     """, (
@@ -50,10 +77,16 @@ def generate_weekly_tasks():
                         sched['title'],
                         sched['equipment_id'],
                         sched['assigned_to'],
-                        week_start,
-                        (get_week_start() + timedelta(days=6)).isoformat()
+                        week_start_iso,
+                        (week_start + timedelta(days=6)).isoformat()
                     ))
-                    
+
+                    # Update last_generated
+                    conn.execute(
+                        "UPDATE pm_schedule SET last_generated=? WHERE id=?",
+                        (week_start_iso, sched['id'])
+                    )
+
                     # Add checklist items if template exists
                     if sched['checklist_template_id']:
                         task_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
@@ -61,21 +94,20 @@ def generate_weekly_tasks():
                             "SELECT * FROM checklist_templates WHERE task_type=? ORDER BY sort_order",
                             (sched['title'],)
                         ).fetchall()
-                        
                         for i, item in enumerate(template_items):
                             conn.execute("""
-                                INSERT INTO pm_checklist_items 
+                                INSERT INTO pm_checklist_items
                                 (task_id, item, sort_order)
                                 VALUES (?, ?, ?)
                             """, (task_id, item['item'], i))
-                    
+
                     tasks_created += 1
-                    logger.debug(f"Created task: {sched['title']} for week {week_start}")
-                
+                    logger.debug(f"Created task: {sched['title']} for week {week_start_iso}")
+
                 except Exception as e:
                     logger.error(f"Failed to create task from schedule {sched['id']}: {e}", exc_info=True)
                     continue
-            
+
             conn.commit()
             logger.info(f"Weekly task generation complete: {tasks_created} tasks created")
     
