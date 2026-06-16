@@ -432,18 +432,7 @@ hr{border:none;border-top:1px solid var(--border);margin:12px 0}
       <div class="card-title">Log Production Breakdown</div>
       <div style="font-size:12px;color:var(--text3);margin-bottom:12px">Start time is captured automatically when you tap Log Breakdown.</div>
       <div class="form-row"><label>Equipment</label>
-        <select id="sv-equip" style="display:none"></select>
-        <div class="plant-tree-wrap" id="sv-tree-wrap">
-          <div class="plant-breadcrumb" id="sv-tree-breadcrumb">
-            <span class="plant-breadcrumb-item" onclick="svTreeRoot()">Plant</span>
-          </div>
-          <div class="plant-node-list" id="sv-tree-nodes"></div>
-        </div>
-        <div id="sv-selected-bar" style="display:none;align-items:center;gap:10px;padding:10px;border:1px solid var(--border);border-radius:8px;margin-top:6px">
-          <span style="font-size:15px">📟</span>
-          <span id="sv-selected-name" style="font-weight:700;font-size:13px;flex:1;color:var(--blue)"></span>
-          <button class="btn btn-ghost btn-sm" onclick="svTreeRoot()">↩ Change</button>
-        </div>
+        <select id="sv-equip"><option value="">Select equipment...</option></select>
       </div>
       <div class="form-row"><label>Assign to artisan</label>
         <select id="sv-artisan"><option value="">Select artisan...</option></select>
@@ -573,18 +562,7 @@ hr{border:none;border-top:1px solid var(--border);margin:12px 0}
       <div class="card-title">Log Breakdown</div>
       <div style="font-size:12px;color:var(--text3);margin-bottom:12px">Start time captured automatically. Complete failure details after repair.</div>
       <div class="form-row"><label>Equipment</label>
-        <select id="mgr-equip" style="display:none"></select>
-        <div class="plant-tree-wrap" id="mgr-tree-wrap">
-          <div class="plant-breadcrumb" id="mgr-tree-breadcrumb">
-            <span class="plant-breadcrumb-item" onclick="mgrTreeRoot()">Plant</span>
-          </div>
-          <div class="plant-node-list" id="mgr-tree-nodes"></div>
-        </div>
-        <div id="mgr-selected-bar" style="display:none;align-items:center;gap:10px;padding:10px;border:1px solid var(--border);border-radius:8px;margin-top:6px">
-          <span style="font-size:15px">📟</span>
-          <span id="mgr-selected-name" style="font-weight:700;font-size:13px;flex:1;color:var(--blue)"></span>
-          <button class="btn btn-ghost btn-sm" onclick="mgrTreeRoot()">↩ Change</button>
-        </div>
+        <select id="mgr-equip"><option value="">Select equipment...</option></select>
       </div>
       <div class="form-row"><label>Attending artisan</label>
         <select id="mgr-artisan"><option value="">Select artisan...</option></select>
@@ -2466,7 +2444,9 @@ async function showSupervisorBoard() {
     equipment.forEach(e => { svReqEq.innerHTML += `<option value="${e.id}">${e.name}</option>`; });
   }
 
-  await svTreeInit();
+  const svEq = document.getElementById('sv-equip');
+  svEq.innerHTML = '<option value="">Select equipment...</option>';
+  (equipment||[]).forEach(e => svEq.innerHTML += `<option value="${e.id}">${e.name}</option>`);
   loadSvActiveBreakdowns();
 }
 
@@ -2625,30 +2605,22 @@ async function submitMgrBreakdown() {
 }
 
 function resetSvBdForm() {
-  svTreeRoot();
+  document.getElementById('sv-equip').value = '';
   document.getElementById('sv-artisan').value = '';
-  document.getElementById('sv-log-form').style.display = '';
 }
 
 function resetMgrBdForm() {
-  mgrTreeRoot();
+  document.getElementById('mgr-equip').value = '';
   document.getElementById('mgr-artisan').value = '';
-  document.getElementById('mgr-log-form').style.display = '';
 }
 
 async function loadMgrActiveBreakdowns() {
   const bds = await api(`/api/breakdowns/supervisor-active/${session.user.id}`) || [];
   const compEl = document.getElementById('mgr-active-completion');
   if (!compEl) return;
-  if (!bds.length) {
-    compEl.innerHTML = '';
-    document.getElementById('mgr-log-form').style.display = '';
-    return;
-  }
-  document.getElementById('mgr-log-form').style.display = 'none';
-  compEl.innerHTML = bds.map(b =>
-    _bdCompletionCard(b, 'markMgrComplete', 'resetMgrBdForm', 'mgr')
-  ).join('');
+  compEl.innerHTML = bds.length
+    ? bds.map(b => _bdCompletionCard(b, 'markMgrComplete', 'resetMgrBdForm', 'mgr')).join('')
+    : '';
 }
 
 async function markMgrComplete(bdId) {
@@ -2752,16 +2724,9 @@ async function loadSvActiveBreakdowns() {
   // Update the Log tab completion section
   const compEl = document.getElementById('sv-active-completion');
   if (!compEl) return;
-  if (!bds.length) {
-    compEl.innerHTML = '';
-    document.getElementById('sv-log-form').style.display = '';
-    return;
-  }
-  // Show completion cards; hide the log form if there's at least one active
-  document.getElementById('sv-log-form').style.display = 'none';
-  compEl.innerHTML = bds.map(b =>
-    _bdCompletionCard(b, 'markSvComplete', 'resetSvBdForm', 'sv')
-  ).join('');
+  compEl.innerHTML = bds.length
+    ? bds.map(b => _bdCompletionCard(b, 'markSvComplete', 'resetSvBdForm', 'sv')).join('')
+    : '';
 }
 
 async function markSvComplete(bdId) {
@@ -2843,7 +2808,9 @@ async function showManagerBoard() {
     artSel.innerHTML += `<option value="${u.id}">${u.name}${u.role==='team_leader'?' (TL)':''}</option>`;
   });
 
-  await mgrTreeInit();
+  const mgrEq = document.getElementById('mgr-equip');
+  mgrEq.innerHTML = '<option value="">Select equipment...</option>';
+  (equipment||[]).forEach(e => mgrEq.innerHTML += `<option value="${e.id}">${e.name}</option>`);
   loadMgrActiveBreakdowns();
   loadMgrOverview();
 }
