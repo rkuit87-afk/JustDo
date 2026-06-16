@@ -582,6 +582,16 @@ def _run_migrations():
         except Exception as e:
             logger.debug(f"Shift confirmations cleanup: {e}")
 
+        # Restore team_leader roles (Decision #0002)
+        # Kock Divan (id:8), Strydom Francois (id:7) → team_leader (were manager)
+        # Hlophe Given (id:13) → team_leader, Electrician (was artisan)
+        try:
+            conn.execute("UPDATE users SET role='team_leader' WHERE id IN (7,8,13)")
+            conn.commit()
+            logger.debug("Team leader roles restored for ids 7, 8, 13")
+        except Exception as e:
+            logger.debug(f"Team leader role migration: {e}")
+
     # Add indexes for performance
     _add_indexes()
     logger.info("Migrations completed")

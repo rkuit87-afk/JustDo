@@ -2440,11 +2440,7 @@ async function showSupervisorBoard() {
   document.getElementById('sv-username').textContent = session.user.name;
 
   // Populate artisan select
-  const artSel = document.getElementById('sv-artisan');
-  artSel.innerHTML = '<option value="">Select artisan...</option>';
-  users.filter(u => u.role==='artisan'||u.role==='team_leader').forEach(u => {
-    artSel.innerHTML += `<option value="${u.id}">${u.name}${u.role==='team_leader'?' (TL)':''}</option>`;
-  });
+  populateArtisanDropdown('sv-artisan');
 
   // Populate request equipment (service-request form)
   const svReqEq = document.getElementById('svreq-equip');
@@ -2812,11 +2808,7 @@ async function showManagerBoard() {
   document.getElementById('mgr-username').textContent = session.user.name;
 
   // Populate artisan select
-  const artSel = document.getElementById('mgr-artisan');
-  artSel.innerHTML = '<option value="">Select artisan...</option>';
-  users.filter(u => u.role==='artisan'||u.role==='team_leader').forEach(u => {
-    artSel.innerHTML += `<option value="${u.id}">${u.name}${u.role==='team_leader'?' (TL)':''}</option>`;
-  });
+  populateArtisanDropdown('mgr-artisan');
 
   populateAreaDropdown('mgr-area', 'Select area...');
   document.getElementById('mgr-equip').innerHTML = '<option value="">Select machine...</option>';
@@ -3010,9 +3002,7 @@ async function showAdminBoard() {
   document.getElementById('alloc-equip-row').style.display = 'none';
 
   // Populate alloc user
-  const usel = document.getElementById('alloc-user');
-  usel.innerHTML = '<option value="">Select artisan...</option>';
-  users.filter(u=>u.role==='artisan'||u.role==='team_leader').forEach(u => usel.innerHTML += `<option value="${u.id}">${u.name}${u.role==='team_leader'?' (TL)':''}</option>`);
+  populateArtisanDropdown('alloc-user');
 
   // Load templates
   templates = await api('/api/templates') || {};
@@ -3903,8 +3893,7 @@ async function openEditJob(taskId, title, desc, assignedTo) {
   document.getElementById('edit-job-title').value = title || '';
   document.getElementById('edit-job-desc').value = desc || '';
   const sel = document.getElementById('edit-job-user');
-  sel.innerHTML = users.filter(u=>u.role==='artisan'||u.role==='team_leader').map(u =>
-    `<option value="${u.id}" ${u.id===assignedTo?'selected':''}>${u.name}${u.role==='team_leader'?' (TL)':''}</option>`).join('');
+  populateArtisanDropdown('edit-job-user', 'Select artisan...', assignedTo);
   document.getElementById('edit-job-modal').classList.add('open');
 }
 
@@ -5654,6 +5643,36 @@ function artSelfEquipPicked(node) {
 
 // ============================================================
 // Inline plant tree navigator — Allocate Job tab
+// ============================================================
+// ARTISAN DROPDOWN — grouped by trade, team leaders first
+// ============================================================
+function populateArtisanDropdown(selId, placeholder, selectedId) {
+  const sel = document.getElementById(selId);
+  if (!sel) return;
+  const list = (users||[]).filter(u => u.role==='artisan'||u.role==='team_leader');
+  const groups = {};
+  list.forEach(u => {
+    const g = u.role === 'team_leader' ? '_TL' : (u.trade || 'Other');
+    if (!groups[g]) groups[g] = [];
+    groups[g].push(u);
+  });
+  const sel_ = v => selectedId && v==selectedId ? ' selected' : '';
+  let html = `<option value="">${placeholder||'Select artisan...'}</option>`;
+  if (groups['_TL']?.length) {
+    html += `<optgroup label="Team Leaders">`;
+    groups['_TL'].sort((a,b)=>a.name.localeCompare(b.name)).forEach(u =>
+      html += `<option value="${u.id}"${sel_(u.id)}>${u.name}</option>`);
+    html += `</optgroup>`;
+  }
+  Object.keys(groups).filter(g=>g!=='_TL').sort().forEach(t => {
+    html += `<optgroup label="${t}">`;
+    groups[t].sort((a,b)=>a.name.localeCompare(b.name)).forEach(u =>
+      html += `<option value="${u.id}"${sel_(u.id)}>${u.name}</option>`);
+    html += `</optgroup>`;
+  });
+  sel.innerHTML = html;
+}
+
 // ============================================================
 // AREA → MACHINE CASCADING DROPDOWNS
 // ============================================================
