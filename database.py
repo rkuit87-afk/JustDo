@@ -53,11 +53,37 @@ CARBON_BLUE_TOKENS = {
     "dispute-sup-color": "#93c5fd",
     "dispute-art-color": "#86efac",
     "badge-brown-text": "#b45309",
+    "card-shadow": "none",
+}
+
+# Shared structural tokens applied to every "— Light" preset before per-preset
+# overrides.  Only these five structural concerns differ — accent tokens come
+# from each individual preset so identity is preserved.
+_LIGHT_BASE = {
+    "bg-base":    "#EBEEF2",   # page canvas — neutral grey, no accent tint
+    "bg-raised":  "#FFFFFF",
+    "bg-sunken":  "#E2E5EA",
+    "surface-1":  "#FFFFFF",   # card bg — white
+    "surface-2":  "#F3F4F6",
+    "surface-3":  "#E5E7EB",
+    "text-primary":   "#0F172A",
+    "text-secondary": "#4B5563",   # WCAG AA: 7.5:1 on white, 6.5:1 on page-bg
+    "text-muted":     "#6B7280",
+    "text-inverse":   "#F8FAFC",
+    "border-subtle":  "#E5E7EB",
+    "border-default": "#D1D5DB",   # card border — neutral mid-grey
+    "border-strong":  "#9CA3AF",
+    "action-secondary":       "#E5E7EB",
+    "action-secondary-hover": "#D1D5DB",
+    "card-shadow":    "0 1px 3px rgba(0,0,0,0.08)",
+    "status-info-text":  "#2563EB",   # darkened — light bg readable
+    "dispute-sup-color": "#1D4ED8",
+    "dispute-art-color": "#059669",
 }
 
 # Curated theme presets — each entry supplies only the tokens that differ from
 # Carbon Blue. get_presets() merges these overrides against CARBON_BLUE_TOKENS
-# to produce the full token set for each preset.
+# (plus _LIGHT_BASE for "— Light" variants) to produce the full token set.
 # Dark variants first, then their light counterparts.
 _PRESET_OVERRIDES = [
     # ── DARK VARIANTS ──────────────────────────────────────────────────────────
@@ -252,85 +278,38 @@ _PRESET_OVERRIDES = [
     },
 
     # ── LIGHT VARIANTS ─────────────────────────────────────────────────────────
+    # Structural tokens (bg, surfaces, borders, text, shadow) are inherited from
+    # _LIGHT_BASE via get_presets(). Each preset only overrides its accent tokens.
     {
         "name": "Carbon Blue — Light",
         "description": "Default blue accent on a crisp white canvas.",
         "tokens": {
-            "bg-base":    "#F8FAFC",
-            "bg-raised":  "#FFFFFF",
-            "bg-sunken":  "#F1F5F9",
-            "surface-1":  "#FFFFFF",
-            "surface-2":  "#F1F5F9",
-            "surface-3":  "#E2E8F0",
-            "text-primary":   "#0F172A",
-            "text-secondary": "#334155",
-            "text-muted":     "#64748B",
-            "text-inverse":   "#F8FAFC",
-            "border-subtle":  "#E2E8F0",
-            "border-default": "#CBD5E1",
-            "border-strong":  "#94A3B8",
-            "action-secondary":       "#E2E8F0",
-            "action-secondary-hover": "#CBD5E1",
-            "status-info-text":       "#2563EB",
-            "dispute-sup-color":      "#1D4ED8",
-            "dispute-art-color":      "#059669",
+            # accent unchanged — Carbon Blue defaults apply from CARBON_BLUE_TOKENS
         },
     },
     {
         "name": "Carbon Crimson — Light",
         "description": "Red accent on a crisp white canvas.",
         "tokens": {
-            "bg-base":    "#F8FAFC",
-            "bg-raised":  "#FFFFFF",
-            "bg-sunken":  "#F1F5F9",
-            "surface-1":  "#FFFFFF",
-            "surface-2":  "#F1F5F9",
-            "surface-3":  "#E2E8F0",
-            "text-primary":   "#0F172A",
-            "text-secondary": "#334155",
-            "text-muted":     "#64748B",
-            "text-inverse":   "#F8FAFC",
-            "border-subtle":  "#E2E8F0",
-            "border-default": "#CBD5E1",
-            "border-strong":  "#94A3B8",
             "action-primary":        "#DC2626",
             "action-primary-hover":  "#B91C1C",
             "action-primary-active": "#991B1B",
-            "action-secondary":      "#E2E8F0",
-            "action-secondary-hover":"#CBD5E1",
             "accent":                "#DC2626",
             "accent-subtle":         "rgba(220,38,38,.10)",
             "focus-ring":            "rgba(220,38,38,.4)",
             "status-info":           "#DC2626",
             "status-info-bg":        "rgba(220,38,38,.10)",
             "status-info-border":    "rgba(220,38,38,.3)",
-            "status-info-text":      "#DC2626",
-            "dispute-sup-color":     "#1D4ED8",
-            "dispute-art-color":     "#059669",
+            "status-info-text":      "#B91C1C",
         },
     },
     {
         "name": "Carbon Emerald — Light",
         "description": "Green accent on a crisp white canvas.",
         "tokens": {
-            "bg-base":    "#F8FAFC",
-            "bg-raised":  "#FFFFFF",
-            "bg-sunken":  "#F1F5F9",
-            "surface-1":  "#FFFFFF",
-            "surface-2":  "#F1F5F9",
-            "surface-3":  "#E2E8F0",
-            "text-primary":   "#0F172A",
-            "text-secondary": "#334155",
-            "text-muted":     "#64748B",
-            "text-inverse":   "#F8FAFC",
-            "border-subtle":  "#E2E8F0",
-            "border-default": "#CBD5E1",
-            "border-strong":  "#94A3B8",
             "action-primary":        "#059669",
             "action-primary-hover":  "#047857",
             "action-primary-active": "#065F46",
-            "action-secondary":      "#E2E8F0",
-            "action-secondary-hover":"#CBD5E1",
             "accent":                "#059669",
             "accent-subtle":         "rgba(5,150,105,.10)",
             "focus-ring":            "rgba(5,150,105,.4)",
@@ -338,80 +317,33 @@ _PRESET_OVERRIDES = [
             "status-info-bg":        "rgba(5,150,105,.10)",
             "status-info-border":    "rgba(5,150,105,.3)",
             "status-info-text":      "#047857",
-            "dispute-sup-color":     "#1D4ED8",
             "dispute-art-color":     "#047857",
         },
     },
     {
         "name": "Midnight — Light",
-        "description": "Cool blue-tinted whites — calm, focused, airy.",
+        "description": "Blue accent on a neutral white canvas — calm and airy.",
         "tokens": {
-            "bg-base":    "#F0F4FF",
-            "bg-raised":  "#F8FAFF",
-            "bg-sunken":  "#E8EEFF",
-            "surface-1":  "#F8FAFF",
-            "surface-2":  "#EEF2FF",
-            "surface-3":  "#E0E7FF",
-            "text-primary":   "#0F172A",
-            "text-secondary": "#334155",
-            "text-muted":     "#64748B",
-            "text-inverse":   "#F0F4FF",
-            "border-subtle":  "#E0E7FF",
-            "border-default": "#C7D2FE",
-            "border-strong":  "#A5B4FC",
-            "action-secondary":       "#E0E7FF",
-            "action-secondary-hover": "#C7D2FE",
-            "status-info-text":       "#2563EB",
-            "dispute-sup-color":      "#1D4ED8",
-            "dispute-art-color":      "#059669",
+            # accent unchanged — same default blue as Carbon Blue
         },
     },
     {
         "name": "Slate — Light",
         "description": "Warm neutral grey on white — clean, no colour cast.",
         "tokens": {
-            "bg-base":    "#F9FAFB",
-            "bg-raised":  "#FFFFFF",
-            "bg-sunken":  "#F3F4F6",
-            "surface-1":  "#FFFFFF",
-            "surface-2":  "#F3F4F6",
-            "surface-3":  "#E5E7EB",
+            # warmer grey text tones preserve Slate identity
             "text-primary":   "#111827",
             "text-secondary": "#374151",
             "text-muted":     "#6B7280",
-            "text-inverse":   "#F9FAFB",
-            "border-subtle":  "#E5E7EB",
-            "border-default": "#D1D5DB",
-            "border-strong":  "#9CA3AF",
-            "action-secondary":       "#E5E7EB",
-            "action-secondary-hover": "#D1D5DB",
-            "status-info-text":       "#2563EB",
-            "dispute-sup-color":      "#1D4ED8",
-            "dispute-art-color":      "#059669",
         },
     },
     {
         "name": "Amber Workshop — Light",
         "description": "Warm amber on a bright workshop canvas.",
         "tokens": {
-            "bg-base":    "#F8FAFC",
-            "bg-raised":  "#FFFFFF",
-            "bg-sunken":  "#F1F5F9",
-            "surface-1":  "#FFFFFF",
-            "surface-2":  "#F1F5F9",
-            "surface-3":  "#E2E8F0",
-            "text-primary":   "#0F172A",
-            "text-secondary": "#334155",
-            "text-muted":     "#64748B",
-            "text-inverse":   "#F8FAFC",
-            "border-subtle":  "#E2E8F0",
-            "border-default": "#CBD5E1",
-            "border-strong":  "#94A3B8",
             "action-primary":        "#D97706",
             "action-primary-hover":  "#B45309",
             "action-primary-active": "#92400E",
-            "action-secondary":      "#E2E8F0",
-            "action-secondary-hover":"#CBD5E1",
             "accent":                "#D97706",
             "accent-subtle":         "rgba(217,119,6,.10)",
             "focus-ring":            "rgba(217,119,6,.4)",
@@ -419,56 +351,29 @@ _PRESET_OVERRIDES = [
             "status-info-bg":        "rgba(217,119,6,.10)",
             "status-info-border":    "rgba(217,119,6,.3)",
             "status-info-text":      "#B45309",
-            "dispute-sup-color":     "#1D4ED8",
-            "dispute-art-color":     "#059669",
         },
     },
     {
         "name": "High Contrast — Light",
-        "description": "Pure white, maximum legibility — bright outdoor use.",
+        "description": "Maximum legibility — bright outdoor use.",
         "tokens": {
-            "bg-base":    "#FFFFFF",
-            "bg-raised":  "#FAFAFA",
-            "bg-sunken":  "#F5F5F5",
-            "surface-1":  "#FFFFFF",
-            "surface-2":  "#F0F0F0",
-            "surface-3":  "#E0E0E0",
+            # stricter text + borders override the shared base
             "text-primary":   "#000000",
             "text-secondary": "#1A1A1A",
             "text-muted":     "#4A4A4A",
-            "text-inverse":   "#FFFFFF",
-            "border-subtle":  "#DDDDDD",
             "border-default": "#AAAAAA",
             "border-strong":  "#666666",
             "action-secondary":       "#E0E0E0",
             "action-secondary-hover": "#CCCCCC",
-            "status-info-text":       "#2563EB",
-            "dispute-sup-color":      "#1D4ED8",
-            "dispute-art-color":      "#059669",
         },
     },
     {
         "name": "Ocean — Light",
         "description": "Teal accent on a bright airy canvas.",
         "tokens": {
-            "bg-base":    "#F8FAFC",
-            "bg-raised":  "#FFFFFF",
-            "bg-sunken":  "#F1F5F9",
-            "surface-1":  "#FFFFFF",
-            "surface-2":  "#F1F5F9",
-            "surface-3":  "#E2E8F0",
-            "text-primary":   "#0F172A",
-            "text-secondary": "#334155",
-            "text-muted":     "#64748B",
-            "text-inverse":   "#F8FAFC",
-            "border-subtle":  "#E2E8F0",
-            "border-default": "#CBD5E1",
-            "border-strong":  "#94A3B8",
             "action-primary":        "#0891B2",
             "action-primary-hover":  "#0E7490",
             "action-primary-active": "#155E75",
-            "action-secondary":      "#E2E8F0",
-            "action-secondary-hover":"#CBD5E1",
             "accent":                "#0891B2",
             "accent-subtle":         "rgba(8,145,178,.10)",
             "focus-ring":            "rgba(8,145,178,.4)",
@@ -477,64 +382,31 @@ _PRESET_OVERRIDES = [
             "status-info-border":    "rgba(8,145,178,.3)",
             "status-info-text":      "#0E7490",
             "dispute-sup-color":     "#0891B2",
-            "dispute-art-color":     "#059669",
         },
     },
     {
         "name": "Twilight — Light",
         "description": "Purple accent on a bright airy canvas.",
         "tokens": {
-            "bg-base":    "#F8FAFC",
-            "bg-raised":  "#FFFFFF",
-            "bg-sunken":  "#F1F5F9",
-            "surface-1":  "#FFFFFF",
-            "surface-2":  "#F1F5F9",
-            "surface-3":  "#E2E8F0",
-            "text-primary":   "#0F172A",
-            "text-secondary": "#334155",
-            "text-muted":     "#64748B",
-            "text-inverse":   "#F8FAFC",
-            "border-subtle":  "#E2E8F0",
-            "border-default": "#CBD5E1",
-            "border-strong":  "#94A3B8",
             "action-primary":        "#7C3AED",
             "action-primary-hover":  "#6D28D9",
             "action-primary-active": "#5B21B6",
-            "action-secondary":      "#E2E8F0",
-            "action-secondary-hover":"#CBD5E1",
             "accent":                "#7C3AED",
             "accent-subtle":         "rgba(124,58,237,.10)",
             "focus-ring":            "rgba(124,58,237,.4)",
             "status-info":           "#7C3AED",
             "status-info-bg":        "rgba(124,58,237,.10)",
             "status-info-border":    "rgba(124,58,237,.3)",
-            "status-info-text":      "#7C3AED",
-            "dispute-sup-color":     "#1D4ED8",
-            "dispute-art-color":     "#059669",
+            "status-info-text":      "#6D28D9",
         },
     },
     {
         "name": "Forest — Light",
         "description": "Pine green accent on a bright natural canvas.",
         "tokens": {
-            "bg-base":    "#F8FAFC",
-            "bg-raised":  "#FFFFFF",
-            "bg-sunken":  "#F1F5F9",
-            "surface-1":  "#FFFFFF",
-            "surface-2":  "#F1F5F9",
-            "surface-3":  "#E2E8F0",
-            "text-primary":   "#0F172A",
-            "text-secondary": "#334155",
-            "text-muted":     "#64748B",
-            "text-inverse":   "#F8FAFC",
-            "border-subtle":  "#E2E8F0",
-            "border-default": "#CBD5E1",
-            "border-strong":  "#94A3B8",
             "action-primary":        "#16A34A",
             "action-primary-hover":  "#15803D",
             "action-primary-active": "#166534",
-            "action-secondary":      "#E2E8F0",
-            "action-secondary-hover":"#CBD5E1",
             "accent":                "#16A34A",
             "accent-subtle":         "rgba(22,163,74,.10)",
             "focus-ring":            "rgba(22,163,74,.4)",
@@ -542,7 +414,6 @@ _PRESET_OVERRIDES = [
             "status-info-bg":        "rgba(22,163,74,.10)",
             "status-info-border":    "rgba(22,163,74,.3)",
             "status-info-text":      "#15803D",
-            "dispute-sup-color":     "#1D4ED8",
             "dispute-art-color":     "#15803D",
         },
     },
@@ -551,12 +422,15 @@ _PRESET_OVERRIDES = [
 def get_presets():
     """Return all curated presets as a list of {name, description, tokens} dicts.
 
-    Each preset's tokens dict is a full token set — CARBON_BLUE_TOKENS merged
-    with that preset's overrides. Callers can pass tokens directly to set_active_theme.
+    Merge order: CARBON_BLUE_TOKENS → _LIGHT_BASE (light variants only) → preset overrides.
+    This guarantees every light preset has the correct structural separation tokens
+    without duplicating them, while accent tokens remain per-preset.
     """
     result = []
     for p in _PRESET_OVERRIDES:
         full_tokens = dict(CARBON_BLUE_TOKENS)
+        if "— Light" in p["name"]:   # "— Light"
+            full_tokens.update(_LIGHT_BASE)
         full_tokens.update(p["tokens"])
         result.append({
             "name":        p["name"],
@@ -1267,6 +1141,30 @@ def _run_migrations():
                 logger.debug("Theme seed: Carbon Blue defaults inserted")
         except Exception as e:
             logger.debug(f"Theme seed: {e}")
+
+        # Patch stored light-theme tokens with updated structural values so the
+        # fix takes effect immediately without requiring the user to re-select.
+        try:
+            row = conn.execute(
+                "SELECT theme_name, tokens FROM theme_settings WHERE id=1"
+            ).fetchone()
+            if row and "— Light" in (row["theme_name"] or ""):
+                stored = json.loads(row["tokens"])
+                # Apply structural patch from _LIGHT_BASE over stored tokens
+                stored.update(_LIGHT_BASE)
+                # Re-apply per-preset accent overrides so identity is preserved
+                for p in _PRESET_OVERRIDES:
+                    if p["name"] == row["theme_name"]:
+                        stored.update(p["tokens"])
+                        break
+                conn.execute(
+                    "UPDATE theme_settings SET tokens=?, updated_at=? WHERE id=1",
+                    (json.dumps(stored), datetime.now().isoformat())
+                )
+                conn.commit()
+                logger.debug(f"Theme patch: structural tokens updated for '{row['theme_name']}'")
+        except Exception as e:
+            logger.debug(f"Theme patch: {e}")
 
     # Add indexes for performance
     _add_indexes()
