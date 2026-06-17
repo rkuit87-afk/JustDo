@@ -2229,11 +2229,17 @@ async function showArtisanBoard() {
   const reqTab = document.getElementById('art-req-tab');
   if (reqTab) reqTab.style.display = session.user.role === 'team_leader' ? '' : 'none';
 
-  // Show Checklists tab if role has accessible templates (checked async)
-  api(`/api/checklists?role=${session.user.role}`).then(tmpls => {
-    const clTab = document.getElementById('art-checklists-tab');
-    if (clTab) clTab.style.display = (tmpls && tmpls.length) ? '' : 'none';
-  });
+  // Show Checklists tab if role has accessible templates — sawshop fills via manager board instead
+  const clTab = document.getElementById('art-checklists-tab');
+  if (clTab) {
+    if (session.user.role === 'sawshop') {
+      clTab.style.display = 'none';
+    } else {
+      api(`/api/checklists?role=${session.user.role}`).then(tmpls => {
+        clTab.style.display = (tmpls && tmpls.length) ? '' : 'none';
+      });
+    }
+  }
 
   // Populate equipment select
   const sel = document.getElementById('artself-equip');
