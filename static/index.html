@@ -1626,6 +1626,10 @@ let pinBuffer = '';
 let activityTimer = null;
 const SESSION_TIMEOUT = 10 * 60 * 1000;
 
+const escHtml = s => String(s == null ? '' : s)
+  .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+  .replace(/"/g,'&quot;').replace(/'/g,'&#x27;');
+
 // ========================================================
 // API
 // ========================================================
@@ -6423,8 +6427,9 @@ function adPmToggle(header) {
 }
 
 function adPmRemoveItem(btn, tplName) {
+  const card = btn.closest('.card');
   btn.closest('[style*="border-bottom"]').remove();
-  adPmSave(btn.closest('.card'), tplName);
+  adPmSave(card, tplName);
 }
 
 function adPmAddItem(btn, tplName) {
@@ -6445,8 +6450,8 @@ async function adPmSave(card, tplName) {
   const spans = card.querySelectorAll('.ad-pm-items [style*="flex:1"]');
   const items = [...spans].map(s => s.textContent.trim()).filter(Boolean);
   await api(`/api/templates/${encodeURIComponent(tplName)}`, 'POST', { items });
-  // Update item count in header
-  const countEl = card.querySelector('span[style*="color:var(--text3)"]');
+  // Update item count in header (span with margin-left)
+  const countEl = card.querySelector('span[style*="margin-left"]');
   if (countEl) countEl.textContent = `${items.length} item${items.length!==1?'s':''}`;
 }
 
