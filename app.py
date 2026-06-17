@@ -3420,6 +3420,347 @@ def checklist_history(tid):
         logger.error(f"checklist_history {tid}: {e}", exc_info=True)
         return jsonify([])
 
+# ============================================================
+# SAWSHOP MODULE — completely isolated from mill data
+# ============================================================
+
+@app.route('/api/ss/machines', methods=['GET'])
+def ss_get_machines():
+    try:
+        with get_db_context() as conn:
+            rows = conn.execute(
+                """SELECT m.id, m.name, m.machine_type, m.active,
+                          COUNT(p.id) as part_count
+                   FROM ss_machines m
+                   LEFT JOIN ss_parts p ON p.machine_id=m.id AND p.active=1
+                   WHERE m.active=1
+                   GROUP BY m.id ORDER BY m.name""").fetchall()
+        return jsonify([dict(r) for r in rows])
+    except Exception as e:
+        logger.error(f"ss_get_machines: {e}", exc_info=True); return jsonify([])
+
+@app.route('/api/ss/machines', methods=['POST'])
+def ss_create_machine():
+    d = safe_json(request)
+    name = (d.get('name') or '').strip()
+    mtype = d.get('machine_type', 'Mechanical')
+    if not name:
+        return jsonify({'status':'error','message':'Name required'}), 400
+    try:
+        with get_db_context() as conn:
+            cur = conn.execute(
+                "INSERT INTO ss_machines (name,machine_type) VALUES (?,?)", (name, mtype))
+            conn.commit()
+        return jsonify({'status':'ok','id':cur.lastrowid})
+    except Exception as e:
+        logger.error(f"ss_create_machine: {e}", exc_info=True)
+        return jsonify({'status':'error','message':'Failed'}), 500
+
+@app.route('/api/ss/machines/<int:mid>', methods=['PUT'])
+def ss_update_machine(mid):
+    d = safe_json(request)
+    name = (d.get('name') or '').strip()
+    mtype = d.get('machine_type', 'Mechanical')
+    if not name:
+        return jsonify({'status':'error','message':'Name required'}), 400
+    try:
+        with get_db_context() as conn:
+            conn.execute("UPDATE ss_machines SET name=?,machine_type=? WHERE id=?", (name, mtype, mid))
+            conn.commit()
+        return jsonify({'status':'ok'})
+    except Exception as e:
+        logger.error(f"ss_update_machine: {e}", exc_info=True)
+        return jsonify({'status':'error'}), 500
+
+@app.route('/api/ss/machines/<int:mid>', methods=['DELETE'])
+def ss_delete_machine(mid):
+    try:
+        with get_db_context() as conn:
+            conn.execute("UPDATE ss_machines SET active=0 WHERE id=?", (mid,))
+            conn.commit()
+        return jsonify({'status':'ok'})
+    except Exception as e:
+        logger.error(f"ss_delete_machine: {e}", exc_info=True)
+        return jsonify({'status':'error'}), 500
+
+@app.route('/api/ss/machines/<int:mid>/parts', methods=['GET'])
+def ss_get_parts(mid):
+    try:
+        with get_db_context() as conn:
+            rows = conn.execute(
+                "SELECT id,part_name,part_number FROM ss_parts WHERE machine_id=? AND active=1 ORDER BY part_name",
+                (mid,)).fetchall()
+        return jsonify([dict(r) for r in rows])
+    except Exception as e:
+        logger.error(f"ss_get_parts: {e}", exc_info=True); return jsonify([])
+
+@app.route('/api/ss/machines/<int:mid>/parts', methods=['POST'])
+def ss_add_part(mid):
+    d = safe_json(request)
+    part_name = (d.get('part_name') or '').strip()
+    part_number = (d.get('part_number') or '').strip() or None
+    if not part_name:
+        return jsonify({'status':'error','message':'Part name required'}), 400
+    try:
+        with get_db_context() as conn:
+            cur = conn.execute(
+                "INSERT INTO ss_parts (machine_id,part_name,part_number) VALUES (?,?,?)",
+                (mid, part_name, part_number))
+            conn.commit()
+        return jsonify({'status':'ok','id':cur.lastrowid})
+    except Exception as e:
+        logger.error(f"ss_add_part: {e}", exc_info=True)
+        return jsonify({'status':'error'}), 500
+
+@app.route('/api/ss/parts/<int:pid>', methods=['PUT'])
+def ss_update_part(pid):
+    d = safe_json(request)
+    part_name = (d.get('part_name') or '').strip()
+    part_number = (d.get('part_number') or '').strip() or None
+    if not part_name:
+        return jsonify({'status':'error','message':'Part name required'}), 400
+    try:
+        with get_db_context() as conn:
+            conn.execute("UPDATE ss_parts SET part_name=?,part_number=? WHERE id=?",
+                         (part_name, part_number, pid))
+            conn.commit()
+        return jsonify({'status':'ok'})
+    except Exception as e:
+        return jsonify({'status':'error'}), 500
+
+@app.route('/api/ss/parts/<int:pid>', methods=['DELETE'])
+def ss_delete_part(pid):
+    try:
+        with get_db_context() as conn:
+            conn.execute("UPDATE ss_parts SET active=0 WHERE id=?", (pid,))
+            conn.commit()
+        return jsonify({'status':'ok'})
+    except Exception as e:
+        return jsonify({'status':'error'}), 500
+
+@app.route('/api/ss/breakdowns', methods=['GET'])
+def ss_get_breakdowns():
+    artisan_id = request.args.get('artisan_id', type=int)
+    status_filter = request.args.get('status', '')
+    try:
+        with get_db_context() as conn:
+            q = """SELECT b.*, m.name as machine_name,
+                          p.part_name, p.part_number,
+                          COALESCE(SUM(j.duration_mins),0) as total_mins
+                   FROM ss_breakdowns b
+                   LEFT JOIN ss_machines m ON m.id=b.machine_id
+                   LEFT JOIN ss_parts p ON p.id=b.part_id
+                   LEFT JOIN ss_job_log j ON j.breakdown_id=b.id
+                   WHERE 1=1"""
+            params = []
+            if artisan_id:
+                q += " AND b.assigned_to=?"; params.append(artisan_id)
+            if status_filter:
+                statuses = status_filter.split(',')
+                q += f" AND b.status IN ({','.join('?'*len(statuses))})"; params += statuses
+            q += " GROUP BY b.id ORDER BY b.logged_at DESC"
+            rows = conn.execute(q, params).fetchall()
+        return jsonify([dict(r) for r in rows])
+    except Exception as e:
+        logger.error(f"ss_get_breakdowns: {e}", exc_info=True); return jsonify([])
+
+@app.route('/api/ss/breakdowns', methods=['POST'])
+def ss_create_breakdown():
+    d = safe_json(request)
+    desc = (d.get('description') or '').strip()
+    if not desc:
+        return jsonify({'status':'error','message':'Description required'}), 400
+    try:
+        with get_db_context() as conn:
+            cur = conn.execute(
+                """INSERT INTO ss_breakdowns
+                   (machine_id,part_id,description,failure_type,logged_by,logged_by_name,
+                    assigned_to,assigned_name,assigned_at,downtime_start)
+                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                (d.get('machine_id'), d.get('part_id'), desc, d.get('failure_type'),
+                 d.get('logged_by'), d.get('logged_by_name'),
+                 d.get('assigned_to'), d.get('assigned_name'),
+                 datetime.now().isoformat() if d.get('assigned_to') else None,
+                 d.get('downtime_start')))
+            bid = cur.lastrowid
+            if d.get('assigned_to'):
+                conn.execute("UPDATE ss_breakdowns SET status='in_progress' WHERE id=?", (bid,))
+            conn.commit()
+        return jsonify({'status':'ok','id':bid})
+    except Exception as e:
+        logger.error(f"ss_create_breakdown: {e}", exc_info=True)
+        return jsonify({'status':'error'}), 500
+
+@app.route('/api/ss/breakdowns/<int:bid>', methods=['PUT'])
+def ss_update_breakdown(bid):
+    d = safe_json(request)
+    action = d.get('action', '')
+    try:
+        with get_db_context() as conn:
+            if action == 'assign':
+                conn.execute(
+                    """UPDATE ss_breakdowns SET assigned_to=?,assigned_name=?,
+                       assigned_at=?,status='in_progress' WHERE id=?""",
+                    (d['assigned_to'], d['assigned_name'], datetime.now().isoformat(), bid))
+            elif action == 'close':
+                conn.execute(
+                    """UPDATE ss_breakdowns SET status='closed',resolution=?,
+                       downtime_end=?,downtime_mins=?,closed_at=? WHERE id=?""",
+                    (d.get('resolution',''), d.get('downtime_end'),
+                     d.get('downtime_mins'), datetime.now().isoformat(), bid))
+            elif action == 'reopen':
+                conn.execute("UPDATE ss_breakdowns SET status='open',closed_at=NULL WHERE id=?", (bid,))
+            conn.commit()
+        return jsonify({'status':'ok'})
+    except Exception as e:
+        logger.error(f"ss_update_breakdown: {e}", exc_info=True)
+        return jsonify({'status':'error'}), 500
+
+@app.route('/api/ss/breakdowns/<int:bid>/time', methods=['GET'])
+def ss_get_time(bid):
+    try:
+        with get_db_context() as conn:
+            rows = conn.execute(
+                "SELECT * FROM ss_job_log WHERE breakdown_id=? ORDER BY logged_at DESC",
+                (bid,)).fetchall()
+        return jsonify([dict(r) for r in rows])
+    except Exception as e:
+        return jsonify([])
+
+@app.route('/api/ss/breakdowns/<int:bid>/time', methods=['POST'])
+def ss_log_time(bid):
+    d = safe_json(request)
+    mins = d.get('duration_mins', 0)
+    if not mins or int(mins) <= 0:
+        return jsonify({'status':'error','message':'Duration required'}), 400
+    try:
+        with get_db_context() as conn:
+            conn.execute(
+                """INSERT INTO ss_job_log
+                   (breakdown_id,artisan_id,artisan_name,work_date,duration_mins,notes)
+                   VALUES (?,?,?,?,?,?)""",
+                (bid, d.get('artisan_id'), d.get('artisan_name'),
+                 d.get('work_date', date.today().isoformat()),
+                 int(mins), d.get('notes','')))
+            conn.commit()
+        return jsonify({'status':'ok'})
+    except Exception as e:
+        logger.error(f"ss_log_time: {e}", exc_info=True)
+        return jsonify({'status':'error'}), 500
+
+@app.route('/api/ss/artisan-time', methods=['GET'])
+def ss_artisan_time():
+    """Artisan time summary — visible to admin and sawshop manager."""
+    try:
+        with get_db_context() as conn:
+            rows = conn.execute(
+                """SELECT j.artisan_name,
+                          COUNT(DISTINCT j.breakdown_id) as jobs,
+                          SUM(j.duration_mins) as total_mins,
+                          SUM(CASE WHEN j.work_date >= date('now','-7 days')
+                                   THEN j.duration_mins ELSE 0 END) as week_mins
+                   FROM ss_job_log j
+                   GROUP BY j.artisan_name ORDER BY total_mins DESC""").fetchall()
+            breakdown_rows = conn.execute(
+                """SELECT b.status, COUNT(*) as cnt FROM ss_breakdowns b GROUP BY b.status"""
+            ).fetchall()
+        return jsonify({
+            'artisan_time': [dict(r) for r in rows],
+            'status_counts': {r['status']: r['cnt'] for r in breakdown_rows}
+        })
+    except Exception as e:
+        logger.error(f"ss_artisan_time: {e}", exc_info=True)
+        return jsonify({'artisan_time':[], 'status_counts':{}})
+
+@app.route('/api/ss/export', methods=['GET'])
+def ss_export():
+    """Generate Excel export of sawshop data, then purge data older than current month."""
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Alignment
+        from io import BytesIO
+
+        with get_db_context() as conn:
+            breakdowns = conn.execute(
+                """SELECT b.id, m.name as machine, p.part_name, p.part_number,
+                          b.description, b.failure_type, b.status,
+                          b.logged_by_name, b.logged_at,
+                          b.assigned_name, b.downtime_mins,
+                          b.resolution, b.closed_at
+                   FROM ss_breakdowns b
+                   LEFT JOIN ss_machines m ON m.id=b.machine_id
+                   LEFT JOIN ss_parts p ON p.id=b.part_id
+                   ORDER BY b.logged_at DESC""").fetchall()
+            timelogs = conn.execute(
+                """SELECT j.breakdown_id, m.name as machine,
+                          j.artisan_name, j.work_date, j.duration_mins, j.notes
+                   FROM ss_job_log j
+                   LEFT JOIN ss_breakdowns b ON b.id=j.breakdown_id
+                   LEFT JOIN ss_machines m ON m.id=b.machine_id
+                   ORDER BY j.work_date DESC, j.artisan_name""").fetchall()
+
+        wb = Workbook()
+        hdr_font = Font(bold=True)
+        hdr_fill = PatternFill("solid", fgColor="1E3A5F")
+        hdr_font_white = Font(bold=True, color="FFFFFF")
+
+        # Sheet 1 — Breakdowns
+        ws = wb.active
+        ws.title = "Breakdowns"
+        headers = ['ID','Machine','Part','Part No.','Description','Type','Status',
+                   'Logged By','Logged At','Assigned To','Downtime (mins)','Resolution','Closed At']
+        ws.append(headers)
+        for cell in ws[1]:
+            cell.font = hdr_font_white
+            cell.fill = hdr_fill
+            cell.alignment = Alignment(horizontal='center')
+        for r in breakdowns:
+            ws.append([r['id'], r['machine'] or '', r['part_name'] or '',
+                       r['part_number'] or '', r['description'], r['failure_type'] or '',
+                       r['status'], r['logged_by_name'] or '', (r['logged_at'] or '')[:16],
+                       r['assigned_name'] or '', r['downtime_mins'] or '',
+                       r['resolution'] or '', (r['closed_at'] or '')[:16]])
+        for col in ws.columns:
+            ws.column_dimensions[col[0].column_letter].width = max(
+                len(str(col[0].value or '')), max((len(str(c.value or '')) for c in col[1:]), default=0)
+            ) + 2
+
+        # Sheet 2 — Artisan Time
+        ws2 = wb.create_sheet("Artisan Time")
+        ws2.append(['Breakdown ID','Machine','Artisan','Work Date','Duration (mins)','Notes'])
+        for cell in ws2[1]:
+            cell.font = hdr_font_white
+            cell.fill = hdr_fill
+            cell.alignment = Alignment(horizontal='center')
+        for r in timelogs:
+            ws2.append([r['breakdown_id'], r['machine'] or '', r['artisan_name'] or '',
+                        r['work_date'] or '', r['duration_mins'], r['notes'] or ''])
+        for col in ws2.columns:
+            ws2.column_dimensions[col[0].column_letter].width = max(
+                len(str(col[0].value or '')), max((len(str(c.value or '')) for c in col[1:]), default=0)
+            ) + 2
+
+        buf = BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+
+        # Purge data older than the start of the current month
+        first_of_month = date.today().replace(day=1).isoformat()
+        with get_db_context() as conn:
+            conn.execute("DELETE FROM ss_job_log WHERE work_date < ?", (first_of_month,))
+            conn.execute(
+                "DELETE FROM ss_breakdowns WHERE status='closed' AND closed_at < ?",
+                (first_of_month,))
+            conn.commit()
+        logger.info(f"Sawshop export generated; purged data before {first_of_month}")
+
+        fname = f"sawshop_{date.today().strftime('%Y_%m')}.xlsx"
+        return send_file(buf, as_attachment=True, download_name=fname,
+                         mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    except Exception as e:
+        logger.error(f"ss_export: {e}", exc_info=True)
+        return jsonify({'status':'error','message':str(e)}), 500
+
 # ---- Background Scheduler ----
 def background_scheduler():
     """Background task scheduler with error recovery."""

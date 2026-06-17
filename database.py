@@ -978,6 +978,55 @@ def init_db():
             value         TEXT
         )''')
 
+        # ── SAWSHOP MODULE — isolated from mill data ─────────────────────────
+        c.execute('''CREATE TABLE IF NOT EXISTS ss_machines (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            name         TEXT    NOT NULL,
+            machine_type TEXT    NOT NULL DEFAULT 'Mechanical',
+            active       INTEGER NOT NULL DEFAULT 1,
+            created_at   TEXT    DEFAULT (datetime('now'))
+        )''')
+
+        c.execute('''CREATE TABLE IF NOT EXISTS ss_parts (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            machine_id   INTEGER NOT NULL REFERENCES ss_machines(id),
+            part_name    TEXT    NOT NULL,
+            part_number  TEXT,
+            active       INTEGER NOT NULL DEFAULT 1,
+            created_at   TEXT    DEFAULT (datetime('now'))
+        )''')
+
+        c.execute('''CREATE TABLE IF NOT EXISTS ss_breakdowns (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            machine_id     INTEGER REFERENCES ss_machines(id),
+            part_id        INTEGER REFERENCES ss_parts(id),
+            description    TEXT    NOT NULL,
+            failure_type   TEXT,
+            status         TEXT    NOT NULL DEFAULT 'open',
+            logged_by      INTEGER,
+            logged_by_name TEXT,
+            logged_at      TEXT    DEFAULT (datetime('now')),
+            assigned_to    INTEGER,
+            assigned_name  TEXT,
+            assigned_at    TEXT,
+            downtime_start TEXT,
+            downtime_end   TEXT,
+            downtime_mins  INTEGER,
+            resolution     TEXT,
+            closed_at      TEXT
+        )''')
+
+        c.execute('''CREATE TABLE IF NOT EXISTS ss_job_log (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            breakdown_id  INTEGER NOT NULL REFERENCES ss_breakdowns(id),
+            artisan_id    INTEGER,
+            artisan_name  TEXT,
+            work_date     TEXT,
+            duration_mins INTEGER NOT NULL,
+            notes         TEXT,
+            logged_at     TEXT    DEFAULT (datetime('now'))
+        )''')
+
         c.execute('''CREATE TABLE IF NOT EXISTS theme_settings (
             id         INTEGER PRIMARY KEY CHECK (id = 1),
             theme_name TEXT    NOT NULL DEFAULT 'Carbon Blue',

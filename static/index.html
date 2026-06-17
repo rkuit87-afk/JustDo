@@ -324,6 +324,7 @@ hr{border:none;border-top:1px solid var(--border);margin:12px 0}
     <button class="nav-tab" onclick="showScreen('art-did',this);loadArtisanHistory()">DidIt</button>
     <button class="nav-tab" id="art-req-tab" style="display:none" onclick="showScreen('art-requisitions',this);loadMyRequisitions()">Requisitions</button>
     <button class="nav-tab" id="art-checklists-tab" style="display:none" onclick="showScreen('art-checklists',this);loadArtisanChecklists()">📋 Checklists</button>
+    <button class="nav-tab" id="art-ss-jobs-tab" style="display:none" onclick="showScreen('art-ss-jobs',this);loadArtSsJobs()">🔧 SS Jobs</button>
   </div>
   <div id="art-tasks" class="tab-pane active">
     <div id="art-tasks-list"></div>
@@ -400,6 +401,34 @@ hr{border:none;border-top:1px solid var(--border);margin:12px 0}
   <!-- Checklists (visible only when role has accessible templates) -->
   <div id="art-checklists" class="tab-pane">
     <div id="art-checklist-templates"></div>
+  </div>
+
+  <!-- Sawshop Jobs (for sawshop artisans) -->
+  <div id="art-ss-jobs" class="tab-pane">
+    <div style="font-size:15px;font-weight:700;color:var(--text);margin-bottom:12px">🔧 My Sawshop Jobs</div>
+    <div id="art-ss-jobs-list"></div>
+
+    <!-- Artisan time log modal -->
+    <div id="art-ss-timelog-modal" class="modal" style="display:none">
+      <div class="modal-box" style="max-width:380px">
+        <div class="modal-title" id="art-ss-timelog-title">Log My Time</div>
+        <input type="hidden" id="art-ss-timelog-bid">
+        <div class="form-row"><label>Work date</label>
+          <input id="art-ss-timelog-date" type="date">
+        </div>
+        <div class="form-row"><label>Duration (minutes) *</label>
+          <input id="art-ss-timelog-mins" type="number" min="1" placeholder="e.g. 60">
+        </div>
+        <div class="form-row"><label>Notes</label>
+          <input id="art-ss-timelog-notes" placeholder="Optional">
+        </div>
+        <div style="display:flex;gap:8px;margin-top:12px">
+          <button class="btn btn-primary btn-sm" onclick="saveArtSsTimeLog()">Log Time</button>
+          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('art-ss-timelog-modal').style.display='none'">Cancel</button>
+          <span class="save-status" id="art-ss-timelog-status"></span>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -552,6 +581,8 @@ hr{border:none;border-top:1px solid var(--border);margin:12px 0}
     <button class="nav-tab" id="mgr-requisitions-tab" onclick="showScreen('mgr-requisitions',this);loadMyRequisitions()">📋 Requisitions</button>
     <button class="nav-tab" id="mgr-team-tab" style="display:none" onclick="showScreen('mgr-team',this);loadMgrTeam()">👷 Team</button>
     <button class="nav-tab" id="mgr-checklists-tab" style="display:none" onclick="showScreen('mgr-checklists',this);loadMgrChecklists()">📋 Checklists</button>
+    <button class="nav-tab" id="mgr-ss-machines-tab" style="display:none" onclick="showScreen('mgr-ss-machines',this);loadSsMachines()">🔧 Machines</button>
+    <button class="nav-tab" id="mgr-ss-jobs-tab" style="display:none" onclick="showScreen('mgr-ss-jobs',this);loadSsJobs()">🔨 Jobs</button>
   </div>
   <div id="mgr-overview" class="tab-pane active">
     <div id="mgr-kpis"></div>
@@ -647,6 +678,175 @@ hr{border:none;border-top:1px solid var(--border);margin:12px 0}
     <div id="mgr-checklist-templates"></div>
   </div>
 
+  <!-- Sawshop Machine Register -->
+  <div id="mgr-ss-machines" class="tab-pane">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div>
+        <div style="font-size:15px;font-weight:700;color:var(--text)">🔧 Machine Register</div>
+        <div style="font-size:12px;color:var(--text3);margin-top:2px">Sawshop → Machine → Type → Part → Part Number</div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="openSsMachineModal()">＋ Add Machine</button>
+    </div>
+    <div id="ss-machine-list"></div>
+
+    <!-- Add/Edit machine modal -->
+    <div id="ss-machine-modal" class="modal" style="display:none">
+      <div class="modal-box" style="max-width:400px">
+        <div class="modal-title" id="ss-machine-modal-title">Add Machine</div>
+        <input type="hidden" id="ss-machine-id">
+        <div class="form-row"><label>Machine Name *</label>
+          <input id="ss-machine-name" placeholder="e.g. Band Saw A">
+        </div>
+        <div class="form-row"><label>Type</label>
+          <select id="ss-machine-type">
+            <option value="Mechanical">Mechanical</option>
+            <option value="Electrical">Electrical</option>
+          </select>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:16px">
+          <button class="btn btn-primary btn-sm" onclick="saveSsMachine()">Save</button>
+          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('ss-machine-modal').style.display='none'">Cancel</button>
+          <span class="save-status" id="ss-machine-status"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Parts sub-panel -->
+    <div id="ss-parts-panel" style="display:none;margin-top:16px">
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <div class="card-title" style="margin:0" id="ss-parts-title">Parts</div>
+          <button class="btn btn-ghost btn-xs" onclick="document.getElementById('ss-parts-panel').style.display='none'">✕ Close</button>
+        </div>
+        <div id="ss-parts-list" style="margin-bottom:12px"></div>
+        <div style="display:grid;grid-template-columns:2fr 1fr auto;gap:6px;align-items:end">
+          <input id="ss-part-name" placeholder="Part name *" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-size:13px;outline:none">
+          <input id="ss-part-number" placeholder="Part no." style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-size:13px;outline:none">
+          <button class="btn btn-primary btn-sm" onclick="addSsPart()">Add Part</button>
+        </div>
+        <input type="hidden" id="ss-parts-machine-id">
+        <span class="save-status" id="ss-part-status" style="margin-top:6px;display:block"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sawshop Jobs (breakdowns + allocation) -->
+  <div id="mgr-ss-jobs" class="tab-pane">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div>
+        <div style="font-size:15px;font-weight:700;color:var(--text)">🔨 Sawshop Jobs</div>
+        <div style="font-size:12px;color:var(--text3);margin-top:2px">Log breakdowns, assign artisans, track downtime</div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="btn btn-ghost btn-sm" onclick="ssSavedExport()" style="color:var(--cyan)">⬇ Export Excel</button>
+        <button class="btn btn-primary btn-sm" onclick="openSsJobModal()">＋ Log Breakdown</button>
+      </div>
+    </div>
+    <div class="nav-tabs" style="border-radius:8px;margin-bottom:12px">
+      <button class="nav-tab active" id="ss-jobs-open-tab" onclick="ssJobsFilter='open,in_progress';loadSsJobs(this)">Open</button>
+      <button class="nav-tab" id="ss-jobs-closed-tab" onclick="ssJobsFilter='closed';loadSsJobs(this)">Closed</button>
+      <button class="nav-tab" id="ss-jobs-all-tab" onclick="ssJobsFilter='';loadSsJobs(this)">All</button>
+    </div>
+    <div id="ss-jobs-list"></div>
+
+    <!-- Create breakdown modal -->
+    <div id="ss-job-modal" class="modal" style="display:none">
+      <div class="modal-box" style="max-width:480px">
+        <div class="modal-title">Log Sawshop Breakdown</div>
+        <div class="form-row"><label>Machine *</label>
+          <select id="ss-job-machine" onchange="loadSsJobParts(this.value)">
+            <option value="">Select machine...</option>
+          </select>
+        </div>
+        <div class="form-row"><label>Part affected</label>
+          <select id="ss-job-part"><option value="">— none / general —</option></select>
+        </div>
+        <div class="form-row"><label>Failure type</label>
+          <select id="ss-job-failure">
+            <option value="Mechanical">Mechanical</option>
+            <option value="Electrical">Electrical</option>
+            <option value="Wear">Wear</option>
+            <option value="Other">Other</option>
+          </select>
+        </div>
+        <div class="form-row"><label>Description *</label>
+          <textarea id="ss-job-desc" placeholder="Describe what failed or what needs attention..."></textarea>
+        </div>
+        <div class="form-row"><label>Assign artisan</label>
+          <select id="ss-job-artisan"><option value="">— assign later —</option></select>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:16px">
+          <button class="btn btn-primary btn-sm" onclick="saveSsJob()">Log Breakdown</button>
+          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('ss-job-modal').style.display='none'">Cancel</button>
+          <span class="save-status" id="ss-job-status"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Close breakdown modal -->
+    <div id="ss-close-modal" class="modal" style="display:none">
+      <div class="modal-box" style="max-width:400px">
+        <div class="modal-title">Close Breakdown</div>
+        <input type="hidden" id="ss-close-id">
+        <div class="form-row"><label>Resolution *</label>
+          <textarea id="ss-close-resolution" placeholder="What was done to resolve this?"></textarea>
+        </div>
+        <div class="form-row"><label>Downtime end</label>
+          <input id="ss-close-downtime-end" type="datetime-local">
+        </div>
+        <div style="display:flex;gap:8px;margin-top:16px">
+          <button class="btn btn-success btn-sm" onclick="saveSsClose()">Close Breakdown</button>
+          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('ss-close-modal').style.display='none'">Cancel</button>
+          <span class="save-status" id="ss-close-status"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Assign artisan modal -->
+    <div id="ss-assign-modal" class="modal" style="display:none">
+      <div class="modal-box" style="max-width:360px">
+        <div class="modal-title">Assign Artisan</div>
+        <input type="hidden" id="ss-assign-bid">
+        <div class="form-row"><label>Select artisan</label>
+          <select id="ss-assign-artisan"><option value="">Select artisan...</option></select>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:16px">
+          <button class="btn btn-primary btn-sm" onclick="saveSsAssign()">Assign</button>
+          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('ss-assign-modal').style.display='none'">Cancel</button>
+          <span class="save-status" id="ss-assign-status"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Time log modal (manager view) -->
+    <div id="ss-timelog-modal" class="modal" style="display:none">
+      <div class="modal-box" style="max-width:440px">
+        <div class="modal-title" id="ss-timelog-title">Time Log</div>
+        <input type="hidden" id="ss-timelog-bid">
+        <div id="ss-timelog-history" style="margin-bottom:12px;max-height:200px;overflow-y:auto"></div>
+        <div style="border-top:1px solid var(--border);padding-top:12px">
+          <div class="form-row"><label>Artisan</label>
+            <select id="ss-timelog-artisan"><option value="">Select artisan...</option></select>
+          </div>
+          <div class="form-row"><label>Work date</label>
+            <input id="ss-timelog-date" type="date">
+          </div>
+          <div class="form-row"><label>Duration (minutes) *</label>
+            <input id="ss-timelog-mins" type="number" min="1" placeholder="e.g. 120">
+          </div>
+          <div class="form-row"><label>Notes</label>
+            <input id="ss-timelog-notes" placeholder="Optional">
+          </div>
+          <div style="display:flex;gap:8px;margin-top:12px">
+            <button class="btn btn-primary btn-sm" onclick="saveSsTimeLog()">Add Time</button>
+            <button class="btn btn-ghost btn-sm" onclick="document.getElementById('ss-timelog-modal').style.display='none'">Close</button>
+            <span class="save-status" id="ss-timelog-status"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
 </div>
 
 <!-- ===================== ADMIN ======================== -->
@@ -677,6 +877,7 @@ hr{border:none;border-top:1px solid var(--border);margin:12px 0}
     <button class="nav-tab" id="stores-nav-tab" style="display:none;color:var(--amber)" onclick="adTab('stores',this)">🏪 Stores</button>
     <button class="nav-tab" id="components-nav-tab" style="display:none;color:var(--blue)" onclick="adTab('components',this)">🔩 Components</button>
     <button class="nav-tab" id="req-handling-nav-tab" style="display:none;color:var(--purple)" onclick="adTab('reqhandling',this)">📋 Req. Handling</button>
+    <button class="nav-tab" id="ad-ss-nav-tab" style="display:none;color:var(--cyan)" onclick="adTab('sawshop',this);loadAdminSawshop()">🔧 Sawshop</button>
   </div>
 
   <!-- Schedule -->
@@ -1238,6 +1439,17 @@ hr{border:none;border-top:1px solid var(--border);margin:12px 0}
         <div id="cl-history-list"></div>
       </div>
     </div>
+  </div>
+
+  <!-- Sawshop overview (admin read-only — artisan time + breakdown summary) -->
+  <div id="ad-tab-sawshop" class="tab-pane">
+    <div style="font-size:15px;font-weight:700;color:var(--text);margin-bottom:4px">🔧 Sawshop Overview</div>
+    <div style="font-size:12px;color:var(--text3);margin-bottom:16px">Artisan time and breakdown summary — sawshop data only</div>
+    <div id="ad-ss-stats" style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px"></div>
+    <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:10px">Artisan Time</div>
+    <div id="ad-ss-artisan-time"></div>
+    <div style="font-size:13px;font-weight:700;color:var(--text);margin-top:20px;margin-bottom:10px">Recent Breakdowns</div>
+    <div id="ad-ss-breakdowns"></div>
   </div>
 
   <!-- Activity -->
@@ -2241,6 +2453,12 @@ async function showArtisanBoard() {
     }
   }
 
+  // Show SS Jobs tab for sawshop artisans (always visible — their primary work)
+  const artSsTab = document.getElementById('art-ss-jobs-tab');
+  if (artSsTab) {
+    artSsTab.style.display = session.user.role === 'sawshop' ? '' : 'none';
+  }
+
   // Populate equipment select
   const sel = document.getElementById('artself-equip');
   sel.innerHTML = '<option value="">Select equipment...</option>';
@@ -2984,13 +3202,18 @@ async function showManagerBoard() {
   if (teamTab) teamTab.style.display = scoped ? '' : 'none';
   const mgrClTab = document.getElementById('mgr-checklists-tab');
   if (mgrClTab) mgrClTab.style.display = scoped ? '' : 'none';
+  const ssMachinesTab = document.getElementById('mgr-ss-machines-tab');
+  if (ssMachinesTab) ssMachinesTab.style.display = scoped ? '' : 'none';
+  const ssJobsTab = document.getElementById('mgr-ss-jobs-tab');
+  if (ssJobsTab) ssJobsTab.style.display = scoped ? '' : 'none';
 
   if (scoped) {
-    // Land directly on Checklists tab for sawshop manager
+    // Land on Machines tab for sawshop manager
     document.getElementById('manager').querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
     document.getElementById('manager').querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
-    document.getElementById('mgr-checklists').classList.add('active');
-    if (mgrClTab) mgrClTab.classList.add('active');
+    document.getElementById('mgr-ss-machines').classList.add('active');
+    if (ssMachinesTab) ssMachinesTab.classList.add('active');
+    loadSsMachines();
     loadMgrChecklists();
   } else {
     // Normal manager: load full board
@@ -3211,6 +3434,9 @@ async function showAdminBoard() {
   // Restore any nav tabs hidden by a prior stores_admin session
   document.querySelectorAll('#admin > .nav-tabs .nav-tab').forEach(btn => btn.style.display = '');
   document.getElementById('req-handling-nav-tab').style.display = 'none';
+  // Sawshop tab shown only for admin (not stores_admin — storesAdminBoard hides all then selectively shows)
+  const adSsTab = document.getElementById('ad-ss-nav-tab');
+  if (adSsTab) adSsTab.style.display = '';
 
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.getElementById('admin').classList.add('active');
@@ -6645,6 +6871,459 @@ async function loadMgrChecklists() {
     div.innerHTML = await renderChecklistForm(t.id, t.name);
     el.appendChild(div);
   }
+}
+
+// ============================================================
+// SAWSHOP MODULE — client-side logic
+// ============================================================
+
+let ssJobsFilter = 'open,in_progress';
+
+// ── Machine Register ─────────────────────────────────────────
+
+async function loadSsMachines() {
+  const el = document.getElementById('ss-machine-list');
+  if (!el) return;
+  const machines = await api('/api/ss/machines') || [];
+  if (!machines.length) {
+    el.innerHTML = '<div class="empty-state">No machines yet. Add your first machine above.</div>';
+    return;
+  }
+  el.innerHTML = machines.map(m => `
+    <div class="card" style="margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <div style="font-weight:700;color:var(--text)">${escHtml(m.name)}</div>
+          <div style="font-size:12px;color:var(--text3);margin-top:2px">${escHtml(m.machine_type)} · ${m.part_count} part${m.part_count!==1?'s':''}</div>
+        </div>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-ghost btn-xs" onclick="openSsPartsPanel(${m.id},'${escHtml(m.name)}')">🔩 Parts</button>
+          <button class="btn btn-ghost btn-xs" onclick="openSsMachineModal(${m.id},'${escHtml(m.name)}','${escHtml(m.machine_type)}')">Edit</button>
+          <button class="btn btn-ghost btn-xs" style="color:var(--red)" onclick="deleteSsMachine(${m.id})">✕</button>
+        </div>
+      </div>
+    </div>`).join('');
+}
+
+function openSsMachineModal(id='', name='', type='Mechanical') {
+  document.getElementById('ss-machine-id').value = id;
+  document.getElementById('ss-machine-name').value = name;
+  document.getElementById('ss-machine-type').value = type;
+  document.getElementById('ss-machine-modal-title').textContent = id ? 'Edit Machine' : 'Add Machine';
+  document.getElementById('ss-machine-status').textContent = '';
+  document.getElementById('ss-machine-modal').style.display = 'flex';
+}
+
+async function saveSsMachine() {
+  const id = document.getElementById('ss-machine-id').value;
+  const name = document.getElementById('ss-machine-name').value.trim();
+  const machine_type = document.getElementById('ss-machine-type').value;
+  const st = document.getElementById('ss-machine-status');
+  if (!name) { st.textContent = 'Name required'; st.style.color = 'var(--red)'; return; }
+  const url = id ? `/api/ss/machines/${id}` : '/api/ss/machines';
+  const method = id ? 'PUT' : 'POST';
+  const r = await api(url, method, { name, machine_type });
+  if (r && r.status === 'ok') {
+    document.getElementById('ss-machine-modal').style.display = 'none';
+    loadSsMachines();
+  } else {
+    st.textContent = 'Save failed'; st.style.color = 'var(--red)';
+  }
+}
+
+async function deleteSsMachine(id) {
+  if (!confirm('Remove this machine?')) return;
+  await api(`/api/ss/machines/${id}`, 'DELETE');
+  loadSsMachines();
+}
+
+async function openSsPartsPanel(machineId, machineName) {
+  document.getElementById('ss-parts-machine-id').value = machineId;
+  document.getElementById('ss-parts-title').textContent = `Parts — ${machineName}`;
+  document.getElementById('ss-part-name').value = '';
+  document.getElementById('ss-part-number').value = '';
+  document.getElementById('ss-part-status').textContent = '';
+  document.getElementById('ss-parts-panel').style.display = 'block';
+  await loadSsParts(machineId);
+  document.getElementById('ss-parts-panel').scrollIntoView({ behavior: 'smooth' });
+}
+
+async function loadSsParts(machineId) {
+  const parts = await api(`/api/ss/machines/${machineId}/parts`) || [];
+  const el = document.getElementById('ss-parts-list');
+  if (!parts.length) { el.innerHTML = '<div style="color:var(--text3);font-size:13px">No parts yet.</div>'; return; }
+  el.innerHTML = `<table class="data-table"><thead><tr><th>Part Name</th><th>Part No.</th><th></th></tr></thead><tbody>${
+    parts.map(p => `<tr>
+      <td>${escHtml(p.part_name)}</td>
+      <td style="color:var(--text3)">${escHtml(p.part_number||'—')}</td>
+      <td><button class="btn btn-ghost btn-xs" style="color:var(--red)" onclick="deleteSsPart(${p.id},${machineId})">✕</button></td>
+    </tr>`).join('')
+  }</tbody></table>`;
+}
+
+async function addSsPart() {
+  const mid = document.getElementById('ss-parts-machine-id').value;
+  const part_name = document.getElementById('ss-part-name').value.trim();
+  const part_number = document.getElementById('ss-part-number').value.trim();
+  const st = document.getElementById('ss-part-status');
+  if (!part_name) { st.textContent = 'Part name required'; st.style.color = 'var(--red)'; return; }
+  const r = await api(`/api/ss/machines/${mid}/parts`, 'POST', { part_name, part_number });
+  if (r && r.status === 'ok') {
+    document.getElementById('ss-part-name').value = '';
+    document.getElementById('ss-part-number').value = '';
+    st.textContent = 'Added'; st.style.color = 'var(--green)';
+    await loadSsParts(mid);
+  } else {
+    st.textContent = 'Failed'; st.style.color = 'var(--red)';
+  }
+}
+
+async function deleteSsPart(pid, mid) {
+  if (!confirm('Remove this part?')) return;
+  await api(`/api/ss/parts/${pid}`, 'DELETE');
+  loadSsParts(mid);
+}
+
+// ── Jobs (Breakdowns + Time) ─────────────────────────────────
+
+async function loadSsJobs(tabBtn) {
+  if (tabBtn) {
+    document.querySelectorAll('#mgr-ss-jobs .nav-tab').forEach(t => t.classList.remove('active'));
+    tabBtn.classList.add('active');
+  }
+  const el = document.getElementById('ss-jobs-list');
+  if (!el) return;
+  const q = ssJobsFilter ? `?status=${encodeURIComponent(ssJobsFilter)}` : '';
+  const jobs = await api(`/api/ss/breakdowns${q}`) || [];
+  if (!jobs.length) {
+    el.innerHTML = '<div class="empty-state">No jobs found.</div>';
+    return;
+  }
+  el.innerHTML = jobs.map(j => {
+    const statusColor = { open:'var(--red)', in_progress:'var(--amber)', closed:'var(--green)' }[j.status] || 'var(--text3)';
+    const totalH = j.total_mins ? `${Math.floor(j.total_mins/60)}h ${j.total_mins%60}m` : '—';
+    return `
+    <div class="card" style="margin-bottom:10px;border-left:3px solid ${statusColor}">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px">
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:700;color:var(--text)">${escHtml(j.machine_name||'Unknown machine')}</div>
+          ${j.part_name ? `<div style="font-size:12px;color:var(--text3)">${escHtml(j.part_name)}${j.part_number ? ` [${escHtml(j.part_number)}]` : ''}</div>` : ''}
+          <div style="font-size:12px;color:var(--text2);margin-top:4px">${escHtml(j.description)}</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:4px">
+            ${j.failure_type||''} · Logged: ${(j.logged_at||'').slice(0,10)} ·
+            <span style="color:${statusColor};font-weight:600">${j.status.replace('_',' ')}</span>
+            ${j.assigned_name ? ` · Assigned: ${escHtml(j.assigned_name)}` : ''} · Time: ${totalH}
+          </div>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-start">
+          <button class="btn btn-ghost btn-xs" onclick="openSsTimelogModal(${j.id},'${escHtml(j.machine_name||'')}')">⏱ Time</button>
+          ${j.status !== 'closed' ? `
+            <button class="btn btn-ghost btn-xs" onclick="openSsAssignModal(${j.id},'${escHtml(j.assigned_name||'')}',${j.assigned_to||'null'})">👷 Assign</button>
+            <button class="btn btn-success btn-xs" onclick="openSsCloseModal(${j.id})">✓ Close</button>
+          ` : `<button class="btn btn-ghost btn-xs" onclick="reopenSsJob(${j.id})">↩ Reopen</button>`}
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function openSsJobModal() {
+  const machines = await api('/api/ss/machines') || [];
+  const mSel = document.getElementById('ss-job-machine');
+  mSel.innerHTML = '<option value="">Select machine...</option>' +
+    machines.map(m => `<option value="${m.id}">${escHtml(m.name)}</option>`).join('');
+  document.getElementById('ss-job-part').innerHTML = '<option value="">— none / general —</option>';
+  document.getElementById('ss-job-desc').value = '';
+  document.getElementById('ss-job-status').textContent = '';
+
+  // Populate sawshop artisans
+  const users = await api('/api/users/by-role/sawshop') || [];
+  const aSel = document.getElementById('ss-job-artisan');
+  aSel.innerHTML = '<option value="">— assign later —</option>' +
+    users.map(u => `<option value="${u.id}" data-name="${escHtml(u.name)}">${escHtml(u.name)}</option>`).join('');
+
+  document.getElementById('ss-job-modal').style.display = 'flex';
+}
+
+async function loadSsJobParts(machineId) {
+  const partSel = document.getElementById('ss-job-part');
+  if (!machineId) { partSel.innerHTML = '<option value="">— none / general —</option>'; return; }
+  const parts = await api(`/api/ss/machines/${machineId}/parts`) || [];
+  partSel.innerHTML = '<option value="">— none / general —</option>' +
+    parts.map(p => `<option value="${p.id}">${escHtml(p.part_name)}${p.part_number ? ` [${p.part_number}]` : ''}</option>`).join('');
+}
+
+async function saveSsJob() {
+  const machine_id = document.getElementById('ss-job-machine').value || null;
+  const part_id = document.getElementById('ss-job-part').value || null;
+  const failure_type = document.getElementById('ss-job-failure').value;
+  const description = document.getElementById('ss-job-desc').value.trim();
+  const artSel = document.getElementById('ss-job-artisan');
+  const assigned_to = artSel.value || null;
+  const assigned_name = assigned_to ? (artSel.options[artSel.selectedIndex].dataset.name || '') : null;
+  const st = document.getElementById('ss-job-status');
+  if (!description) { st.textContent = 'Description required'; st.style.color = 'var(--red)'; return; }
+  const r = await api('/api/ss/breakdowns', 'POST', {
+    machine_id, part_id, failure_type, description,
+    logged_by: session.user.id, logged_by_name: session.user.name,
+    assigned_to: assigned_to ? parseInt(assigned_to) : null, assigned_name,
+    downtime_start: new Date().toISOString()
+  });
+  if (r && r.status === 'ok') {
+    document.getElementById('ss-job-modal').style.display = 'none';
+    loadSsJobs();
+  } else {
+    st.textContent = 'Failed to log'; st.style.color = 'var(--red)';
+  }
+}
+
+function openSsCloseModal(bid) {
+  document.getElementById('ss-close-id').value = bid;
+  document.getElementById('ss-close-resolution').value = '';
+  document.getElementById('ss-close-status').textContent = '';
+  const now = new Date();
+  now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+  document.getElementById('ss-close-downtime-end').value = now.toISOString().slice(0,16);
+  document.getElementById('ss-close-modal').style.display = 'flex';
+}
+
+async function saveSsClose() {
+  const bid = document.getElementById('ss-close-id').value;
+  const resolution = document.getElementById('ss-close-resolution').value.trim();
+  const downtime_end = document.getElementById('ss-close-downtime-end').value;
+  const st = document.getElementById('ss-close-status');
+  if (!resolution) { st.textContent = 'Resolution required'; st.style.color = 'var(--red)'; return; }
+  const r = await api(`/api/ss/breakdowns/${bid}`, 'PUT', {
+    action: 'close', resolution, downtime_end
+  });
+  if (r && r.status === 'ok') {
+    document.getElementById('ss-close-modal').style.display = 'none';
+    loadSsJobs();
+  } else {
+    st.textContent = 'Failed'; st.style.color = 'var(--red)';
+  }
+}
+
+async function reopenSsJob(bid) {
+  await api(`/api/ss/breakdowns/${bid}`, 'PUT', { action: 'reopen' });
+  loadSsJobs();
+}
+
+async function openSsAssignModal(bid, currentName, currentId) {
+  document.getElementById('ss-assign-bid').value = bid;
+  document.getElementById('ss-assign-status').textContent = '';
+  const users = await api('/api/users/by-role/sawshop') || [];
+  const aSel = document.getElementById('ss-assign-artisan');
+  aSel.innerHTML = '<option value="">Select artisan...</option>' +
+    users.map(u => `<option value="${u.id}" data-name="${escHtml(u.name)}" ${u.id==currentId?'selected':''}>${escHtml(u.name)}</option>`).join('');
+  document.getElementById('ss-assign-modal').style.display = 'flex';
+}
+
+async function saveSsAssign() {
+  const bid = document.getElementById('ss-assign-bid').value;
+  const aSel = document.getElementById('ss-assign-artisan');
+  const assigned_to = aSel.value;
+  const assigned_name = assigned_to ? (aSel.options[aSel.selectedIndex].dataset.name || '') : '';
+  const st = document.getElementById('ss-assign-status');
+  if (!assigned_to) { st.textContent = 'Select an artisan'; st.style.color = 'var(--red)'; return; }
+  const r = await api(`/api/ss/breakdowns/${bid}`, 'PUT', {
+    action: 'assign', assigned_to: parseInt(assigned_to), assigned_name
+  });
+  if (r && r.status === 'ok') {
+    document.getElementById('ss-assign-modal').style.display = 'none';
+    loadSsJobs();
+  } else {
+    st.textContent = 'Failed'; st.style.color = 'var(--red)';
+  }
+}
+
+async function openSsTimelogModal(bid, machineName) {
+  document.getElementById('ss-timelog-bid').value = bid;
+  document.getElementById('ss-timelog-title').textContent = `Time Log — ${machineName}`;
+  document.getElementById('ss-timelog-mins').value = '';
+  document.getElementById('ss-timelog-notes').value = '';
+  document.getElementById('ss-timelog-status').textContent = '';
+
+  // Set default date to today
+  document.getElementById('ss-timelog-date').value = new Date().toISOString().split('T')[0];
+
+  // Populate artisans
+  const users = await api('/api/users/by-role/sawshop') || [];
+  const aSel = document.getElementById('ss-timelog-artisan');
+  aSel.innerHTML = '<option value="">Select artisan...</option>' +
+    users.map(u => `<option value="${u.id}" data-name="${escHtml(u.name)}">${escHtml(u.name)}</option>`).join('');
+
+  // Load history
+  const logs = await api(`/api/ss/breakdowns/${bid}/time`) || [];
+  const hist = document.getElementById('ss-timelog-history');
+  if (!logs.length) {
+    hist.innerHTML = '<div style="color:var(--text3);font-size:12px">No time logged yet.</div>';
+  } else {
+    const totalMins = logs.reduce((s,l) => s + l.duration_mins, 0);
+    hist.innerHTML = `<div style="font-size:12px;color:var(--text3);margin-bottom:6px">Total: ${Math.floor(totalMins/60)}h ${totalMins%60}m</div>
+      <table class="data-table" style="font-size:12px">
+        <thead><tr><th>Artisan</th><th>Date</th><th>Duration</th><th>Notes</th></tr></thead>
+        <tbody>${logs.map(l => `<tr>
+          <td>${escHtml(l.artisan_name||'—')}</td>
+          <td>${l.work_date||'—'}</td>
+          <td>${Math.floor(l.duration_mins/60)}h ${l.duration_mins%60}m</td>
+          <td style="color:var(--text3)">${escHtml(l.notes||'')}</td>
+        </tr>`).join('')}</tbody>
+      </table>`;
+  }
+
+  document.getElementById('ss-timelog-modal').style.display = 'flex';
+}
+
+async function saveSsTimeLog() {
+  const bid = document.getElementById('ss-timelog-bid').value;
+  const aSel = document.getElementById('ss-timelog-artisan');
+  const artisan_id = aSel.value || null;
+  const artisan_name = artisan_id ? (aSel.options[aSel.selectedIndex].dataset.name || '') : '';
+  const work_date = document.getElementById('ss-timelog-date').value;
+  const duration_mins = parseInt(document.getElementById('ss-timelog-mins').value) || 0;
+  const notes = document.getElementById('ss-timelog-notes').value.trim();
+  const st = document.getElementById('ss-timelog-status');
+  if (!duration_mins) { st.textContent = 'Duration required'; st.style.color = 'var(--red)'; return; }
+  const r = await api(`/api/ss/breakdowns/${bid}/time`, 'POST', {
+    artisan_id: artisan_id ? parseInt(artisan_id) : null,
+    artisan_name, work_date, duration_mins, notes
+  });
+  if (r && r.status === 'ok') {
+    st.textContent = 'Saved'; st.style.color = 'var(--green)';
+    document.getElementById('ss-timelog-mins').value = '';
+    document.getElementById('ss-timelog-notes').value = '';
+    // Refresh history
+    const bid2 = document.getElementById('ss-timelog-bid').value;
+    const machine = document.getElementById('ss-timelog-title').textContent.replace('Time Log — ','');
+    await openSsTimelogModal(bid2, machine);
+  } else {
+    st.textContent = 'Failed'; st.style.color = 'var(--red)';
+  }
+}
+
+async function ssSavedExport() {
+  if (!confirm('This will export all sawshop data to Excel and delete data older than this month. Continue?')) return;
+  window.location.href = '/api/ss/export';
+}
+
+// ── Artisan SS Jobs ──────────────────────────────────────────
+
+async function loadArtSsJobs() {
+  const el = document.getElementById('art-ss-jobs-list');
+  if (!el) return;
+  const jobs = await api(`/api/ss/breakdowns?artisan_id=${session.user.id}&status=open,in_progress`) || [];
+  if (!jobs.length) {
+    el.innerHTML = '<div class="empty-state">No jobs currently assigned to you.</div>';
+    return;
+  }
+  el.innerHTML = jobs.map(j => `
+    <div class="card" style="margin-bottom:10px;border-left:3px solid var(--amber)">
+      <div style="font-weight:700;color:var(--text)">${escHtml(j.machine_name||'Machine')}</div>
+      ${j.part_name ? `<div style="font-size:12px;color:var(--text3)">${escHtml(j.part_name)}</div>` : ''}
+      <div style="font-size:12px;color:var(--text2);margin-top:4px">${escHtml(j.description)}</div>
+      <div style="font-size:11px;color:var(--text3);margin-top:4px">
+        ${j.failure_type||''} · ${(j.logged_at||'').slice(0,10)} · Time logged: ${
+          j.total_mins ? `${Math.floor(j.total_mins/60)}h ${j.total_mins%60}m` : '—'
+        }
+      </div>
+      <div style="margin-top:8px">
+        <button class="btn btn-primary btn-sm" onclick="openArtSsTimelogModal(${j.id},'${escHtml(j.machine_name||'')}')">⏱ Log My Time</button>
+      </div>
+    </div>`).join('');
+}
+
+async function openArtSsTimelogModal(bid, machineName) {
+  document.getElementById('art-ss-timelog-bid').value = bid;
+  document.getElementById('art-ss-timelog-title').textContent = `Log Time — ${machineName}`;
+  document.getElementById('art-ss-timelog-mins').value = '';
+  document.getElementById('art-ss-timelog-notes').value = '';
+  document.getElementById('art-ss-timelog-status').textContent = '';
+  document.getElementById('art-ss-timelog-date').value = new Date().toISOString().split('T')[0];
+  document.getElementById('art-ss-timelog-modal').style.display = 'flex';
+}
+
+async function saveArtSsTimeLog() {
+  const bid = document.getElementById('art-ss-timelog-bid').value;
+  const work_date = document.getElementById('art-ss-timelog-date').value;
+  const duration_mins = parseInt(document.getElementById('art-ss-timelog-mins').value) || 0;
+  const notes = document.getElementById('art-ss-timelog-notes').value.trim();
+  const st = document.getElementById('art-ss-timelog-status');
+  if (!duration_mins) { st.textContent = 'Duration required'; st.style.color = 'var(--red)'; return; }
+  const r = await api(`/api/ss/breakdowns/${bid}/time`, 'POST', {
+    artisan_id: session.user.id,
+    artisan_name: session.user.name,
+    work_date, duration_mins, notes
+  });
+  if (r && r.status === 'ok') {
+    st.textContent = 'Time logged!'; st.style.color = 'var(--green)';
+    document.getElementById('art-ss-timelog-mins').value = '';
+    document.getElementById('art-ss-timelog-notes').value = '';
+    loadArtSsJobs();
+  } else {
+    st.textContent = 'Failed'; st.style.color = 'var(--red)';
+  }
+}
+
+// ── Admin Sawshop view ────────────────────────────────────────
+
+async function loadAdminSawshop() {
+  const data = await api('/api/ss/artisan-time');
+  if (!data) return;
+
+  // Status stats
+  const statsEl = document.getElementById('ad-ss-stats');
+  const counts = data.status_counts || {};
+  const open = (counts.open||0) + (counts.in_progress||0);
+  const closed = counts.closed || 0;
+  statsEl.innerHTML = `
+    <div class="kpi-card" style="flex:1;min-width:120px">
+      <div class="kpi-value" style="color:var(--amber)">${open}</div>
+      <div class="kpi-label">Open Jobs</div>
+    </div>
+    <div class="kpi-card" style="flex:1;min-width:120px">
+      <div class="kpi-value" style="color:var(--green)">${closed}</div>
+      <div class="kpi-label">Closed Jobs</div>
+    </div>`;
+
+  // Artisan time table
+  const artEl = document.getElementById('ad-ss-artisan-time');
+  const artList = data.artisan_time || [];
+  if (!artList.length) {
+    artEl.innerHTML = '<div style="color:var(--text3);font-size:13px">No time logged yet.</div>';
+  } else {
+    artEl.innerHTML = `<table class="data-table">
+      <thead><tr><th>Artisan</th><th>Jobs</th><th>This Week</th><th>All Time</th></tr></thead>
+      <tbody>${artList.map(a => `<tr>
+        <td>${escHtml(a.artisan_name||'—')}</td>
+        <td>${a.jobs}</td>
+        <td>${a.week_mins ? `${Math.floor(a.week_mins/60)}h ${a.week_mins%60}m` : '—'}</td>
+        <td>${a.total_mins ? `${Math.floor(a.total_mins/60)}h ${a.total_mins%60}m` : '—'}</td>
+      </tr>`).join('')}</tbody>
+    </table>`;
+  }
+
+  // Recent breakdowns
+  const bdEl = document.getElementById('ad-ss-breakdowns');
+  const jobs = await api('/api/ss/breakdowns') || [];
+  if (!jobs.length) {
+    bdEl.innerHTML = '<div style="color:var(--text3);font-size:13px">No breakdowns recorded.</div>';
+    return;
+  }
+  bdEl.innerHTML = `<table class="data-table" style="font-size:12px">
+    <thead><tr><th>Machine</th><th>Description</th><th>Status</th><th>Assigned</th><th>Logged</th><th>Time</th></tr></thead>
+    <tbody>${jobs.slice(0,30).map(j => {
+      const statusColor = { open:'var(--red)', in_progress:'var(--amber)', closed:'var(--green)' }[j.status] || 'var(--text3)';
+      return `<tr>
+        <td>${escHtml(j.machine_name||'—')}</td>
+        <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(j.description)}</td>
+        <td><span style="color:${statusColor};font-weight:600">${j.status.replace('_',' ')}</span></td>
+        <td>${escHtml(j.assigned_name||'—')}</td>
+        <td>${(j.logged_at||'').slice(0,10)}</td>
+        <td>${j.total_mins ? `${Math.floor(j.total_mins/60)}h ${j.total_mins%60}m` : '—'}</td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table>`;
 }
 
 // ── Operator (artisan board): load accessible checklists ─────
