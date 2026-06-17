@@ -546,10 +546,10 @@ hr{border:none;border-top:1px solid var(--border);margin:12px 0}
     </div>
   </div>
   <div class="nav-tabs">
-    <button class="nav-tab active" onclick="showScreen('mgr-overview',this)">Overview</button>
-    <button class="nav-tab" onclick="showScreen('mgr-log',this)">Log Breakdown</button>
-    <button class="nav-tab" onclick="showScreen('mgr-breakdowns',this)">Breakdowns</button>
-    <button class="nav-tab" onclick="showScreen('mgr-requisitions',this);loadMyRequisitions()">📋 Requisitions</button>
+    <button class="nav-tab active" id="mgr-overview-tab" onclick="showScreen('mgr-overview',this)">Overview</button>
+    <button class="nav-tab" id="mgr-log-tab" onclick="showScreen('mgr-log',this)">Log Breakdown</button>
+    <button class="nav-tab" id="mgr-breakdowns-tab" onclick="showScreen('mgr-breakdowns',this)">Breakdowns</button>
+    <button class="nav-tab" id="mgr-requisitions-tab" onclick="showScreen('mgr-requisitions',this);loadMyRequisitions()">📋 Requisitions</button>
     <button class="nav-tab" id="mgr-team-tab" style="display:none" onclick="showScreen('mgr-team',this);loadMgrTeam()">👷 Team</button>
     <button class="nav-tab" id="mgr-checklists-tab" style="display:none" onclick="showScreen('mgr-checklists',this);loadMgrChecklists()">📋 Checklists</button>
   </div>
@@ -2973,19 +2973,33 @@ async function showManagerBoard() {
   document.getElementById('manager').classList.add('active');
   document.getElementById('mgr-username').textContent = session.user.name;
 
-  // Show Team and Checklists tabs only for users with a create_scope
+  const scoped = !!session.user.create_scope;
+
+  // Sawshop manager: hide all mill-floor tabs, show only Team + Checklists
+  ['mgr-overview-tab','mgr-log-tab','mgr-breakdowns-tab','mgr-requisitions-tab'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = scoped ? 'none' : '';
+  });
   const teamTab = document.getElementById('mgr-team-tab');
-  if (teamTab) teamTab.style.display = session.user.create_scope ? '' : 'none';
+  if (teamTab) teamTab.style.display = scoped ? '' : 'none';
   const mgrClTab = document.getElementById('mgr-checklists-tab');
-  if (mgrClTab) mgrClTab.style.display = session.user.create_scope ? '' : 'none';
+  if (mgrClTab) mgrClTab.style.display = scoped ? '' : 'none';
 
-  // Populate artisan select
-  populateArtisanDropdown('mgr-artisan');
-
-  populateAreaDropdown('mgr-area', 'Select area...');
-  document.getElementById('mgr-equip').innerHTML = '<option value="">Select machine...</option>';
-  loadMgrActiveBreakdowns();
-  loadMgrOverview();
+  if (scoped) {
+    // Land directly on Checklists tab for sawshop manager
+    document.getElementById('manager').querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+    document.getElementById('manager').querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+    document.getElementById('mgr-checklists').classList.add('active');
+    if (mgrClTab) mgrClTab.classList.add('active');
+    loadMgrChecklists();
+  } else {
+    // Normal manager: load full board
+    populateArtisanDropdown('mgr-artisan');
+    populateAreaDropdown('mgr-area', 'Select area...');
+    document.getElementById('mgr-equip').innerHTML = '<option value="">Select machine...</option>';
+    loadMgrActiveBreakdowns();
+    loadMgrOverview();
+  }
 }
 
 function toggleMgrAddUser() {
