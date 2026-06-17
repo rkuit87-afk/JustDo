@@ -6364,10 +6364,29 @@ async function savePB() {
 
 let _clActiveTid = null; // template id currently open in field editor
 
+// Classify a PM template name into a mill section (Sawshop excluded from admin)
+function getPmSection(name) {
+  const n = name.toUpperCase();
+  if (n.includes('SAWSHOP') || n.startsWith('SS ')) return 'Sawshop';
+  if (n.includes('BOILER') || n.includes('DIESEL') || n.includes('FIREPUMP') ||
+      n.includes('FIRE PUMP') || n.includes('SOLAR') || n.includes('SUBSTATION') ||
+      n.includes('RMU') || n.includes('WEIGHBRIDGE') || n.includes('EARTH LEAKAGE') ||
+      n.includes('TREATMENT'))
+    return 'Boiler & Utilities';
+  if (n.includes('KILN') || n.includes('BOLLMAN') || n.includes('TFD') || n.includes('WINDSOR'))
+    return 'Kilns';
+  if (n.includes('DRYMILL') || n.includes(' - DM') || n.includes('DRYMILL'))
+    return 'Drymill';
+  if (n.includes('WETMILL') || n.includes(' - WM') || n.includes('LOGYARD') || n.includes('DEBARKER'))
+    return 'Wetmill';
+  return 'General';
+}
+
 // ── Admin: list all templates (operational forms + PM checklists) ──
 async function loadAdminChecklists() {
-  // Operational forms
-  const tmpls = await api('/api/checklists') || [];
+  // Operational forms — exclude sawshop (Stefan manages those)
+  const allTmpls = await api('/api/checklists') || [];
+  const tmpls = allTmpls.filter(t => !(t.target_roles || []).includes('sawshop'));
   const el = document.getElementById('ad-checklist-list');
   if (!tmpls.length) {
     el.innerHTML = '<div class="empty-state">No operational forms yet. Click "+ New Form" to create one.</div>';
@@ -6376,8 +6395,8 @@ async function loadAdminChecklists() {
       <div class="card" style="margin-bottom:10px">
         <div style="display:flex;justify-content:space-between;align-items:flex-start">
           <div>
-            <div style="font-weight:700;color:var(--text)">${t.name}</div>
-            <div style="font-size:12px;color:var(--text3);margin-top:2px">${t.description || ''}</div>
+            <div style="font-weight:700;color:var(--text)">${escHtml(t.name)}</div>
+            <div style="font-size:12px;color:var(--text3);margin-top:2px">${escHtml(t.description || '')}</div>
             <div style="font-size:11px;color:var(--text3);margin-top:4px">Roles: ${(t.target_roles||[]).join(', ')}</div>
           </div>
           <div style="display:flex;gap:6px">
@@ -6389,39 +6408,52 @@ async function loadAdminChecklists() {
       </div>`).join('');
   }
 
-  // PM task checklists
+  // PM task checklists — grouped by mill section, Sawshop excluded
   const pmTemplates = await api('/api/templates') || {};
   const pmEl = document.getElementById('ad-pm-checklist-list');
-  const names = Object.keys(pmTemplates).sort();
-  if (!names.length) {
-    pmEl.innerHTML = '<div class="empty-state">No PM checklist templates found.</div>';
-    return;
-  }
-  pmEl.innerHTML = names.map(name => {
-    const items = pmTemplates[name] || [];
-    const itemsHtml = items.map((it, i) => `
-      <div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border)">
-        <span style="flex:1;font-size:13px;color:var(--text)">${escHtml(it.item)}</span>
-        <button class="btn btn-ghost btn-xs" style="color:var(--red)" onclick="adPmRemoveItem(this,'${escHtml(name)}')">✕</button>
-      </div>`).join('');
-    return `<div class="card" style="margin-bottom:8px">
-      <div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="adPmToggle(this)">
-        <div>
-          <span style="font-weight:600;color:var(--text)">${escHtml(name)}</span>
-          <span style="font-size:11px;color:var(--text3);margin-left:8px">${items.length} item${items.length!==1?'s':''}</span>
+  const allNames = Object.keys(pmTemplates).sort();
+  const sectionOrder = ['Boiler & Utilities', 'Kilns', 'Wetmill', 'Drymill', 'General'];
+  const sections = {};
+  sectionOrder.forEach(s => sections[s] = []);
+  allNames.forEach(name => {
+    const sec = getPmSection(name);
+    if (sec !== 'Sawshop') sections[sec].push(name);
+  });
+
+  let html = '';
+  sectionOrder.forEach(sec => {
+    const names = sections[sec];
+    if (!names.length) return;
+    html += `<div style="margin-bottom:20px">
+      <div style="font-size:13px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid var(--border)">${sec}</div>`;
+    names.forEach(name => {
+      const items = pmTemplates[name] || [];
+      const itemsHtml = items.map(it => `
+        <div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border)">
+          <span style="flex:1;font-size:13px;color:var(--text)">${escHtml(it.item)}</span>
+          <button class="btn btn-ghost btn-xs" style="color:var(--red)" onclick="adPmRemoveItem(this,'${escHtml(name)}')">✕</button>
+        </div>`).join('');
+      html += `<div class="card" style="margin-bottom:6px">
+        <div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="adPmToggle(this)">
+          <div>
+            <span style="font-weight:600;color:var(--text)">${escHtml(name)}</span>
+            <span style="font-size:11px;color:var(--text3);margin-left:8px">${items.length} item${items.length!==1?'s':''}</span>
+          </div>
+          <span style="font-size:12px;color:var(--text3)">▼</span>
         </div>
-        <span style="font-size:12px;color:var(--text3)">▼</span>
-      </div>
-      <div class="ad-pm-body" style="display:none;margin-top:10px">
-        <div class="ad-pm-items">${itemsHtml || '<div style="font-size:12px;color:var(--text3);padding:6px 0">No items yet.</div>'}</div>
-        <div style="display:flex;gap:6px;margin-top:8px">
-          <input class="ad-pm-new-item" placeholder="New checklist item..." style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--text);font-size:13px;outline:none">
-          <button class="btn btn-ghost btn-sm" onclick="adPmAddItem(this,'${escHtml(name)}')">Add</button>
-          <button class="btn btn-danger btn-sm" onclick="adPmDelete('${escHtml(name)}')">Delete</button>
+        <div class="ad-pm-body" style="display:none;margin-top:10px">
+          <div class="ad-pm-items">${itemsHtml || '<div style="font-size:12px;color:var(--text3);padding:6px 0">No items yet.</div>'}</div>
+          <div style="display:flex;gap:6px;margin-top:8px">
+            <input class="ad-pm-new-item" placeholder="New checklist item..." style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--text);font-size:13px;outline:none">
+            <button class="btn btn-ghost btn-sm" onclick="adPmAddItem(this,'${escHtml(name)}')">Add</button>
+            <button class="btn btn-danger btn-sm" onclick="adPmDelete('${escHtml(name)}')">Delete</button>
+          </div>
         </div>
-      </div>
-    </div>`;
-  }).join('');
+      </div>`;
+    });
+    html += '</div>';
+  });
+  pmEl.innerHTML = html || '<div class="empty-state">No PM checklist templates found.</div>';
 }
 
 function adPmToggle(header) {
