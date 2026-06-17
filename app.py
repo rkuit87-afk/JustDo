@@ -3,10 +3,11 @@ Mill Maintenance Terminal - Improved Version
 With error handling, structured logging, and better database management
 """
 
-from flask import Flask, request, jsonify, send_from_directory, send_file
+from flask import Flask, request, jsonify, send_from_directory, send_file, Response
 import json, os, threading, time, logging
 from datetime import datetime, date, timedelta
-from database import get_db_context, init_db, seed_data, get_setting, set_setting, DB_FILE
+from database import (get_db_context, init_db, seed_data, get_setting, set_setting, DB_FILE,
+                      get_active_theme, set_active_theme, CARBON_BLUE_TOKENS, get_presets)
 from scheduler import generate_weekly_tasks, get_tasks_for_artisan, mark_task_done, get_week_start
 from reports import generate_weekly_report, send_weekly_report, send_monthly_archive
 
@@ -3129,6 +3130,81 @@ def api_plant_delete_node(node_id):
     except Exception as e:
         logger.error(f"api_plant_delete_node error: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
+
+
+# ---- Theme Engine ----
+
+# Legacy aliases are always fixed — they resolve canonical tokens to old names.
+# --cyan and --gray are hardcoded because they have no canonical token equivalent.
+_THEME_LEGACY_CSS = """\
+  --bg: var(--bg-base);
+  --surface: var(--surface-1);
+  --surface2: var(--surface-2);
+  --surface3: var(--surface-3);
+  --border: var(--border-default);
+  --text: var(--text-primary);
+  --text2: var(--text-secondary);
+  --text3: var(--text-muted);
+  --blue: var(--action-primary);
+  --blue2: var(--action-primary-hover);
+  --green: var(--status-success);
+  --red: var(--status-critical);
+  --amber: var(--status-warning);
+  --purple: var(--role-stores-admin);
+  --brown: var(--role-team-leader);
+  --cyan: #06b6d4;
+  --gray: #64748B;"""
+
+@app.route('/theme.css')
+def serve_theme_css():
+    """Serve the active theme as a CSS :root block. No-cache so changes apply immediately."""
+    theme_name, tokens = get_active_theme()
+    lines = [f"/* JustDo — {theme_name} */", ":root {"]
+    for k, v in tokens.items():
+        lines.append(f"  --{k}: {v};")
+    lines.append(_THEME_LEGACY_CSS)
+    lines.append("}")
+    css = "\n".join(lines)
+    return Response(css, mimetype='text/css',
+                    headers={"Cache-Control": "no-cache, must-revalidate", "Pragma": "no-cache"})
+
+@app.route('/api/theme', methods=['GET'])
+def api_theme_get():
+    """Return the active theme name and token dict."""
+    theme_name, tokens = get_active_theme()
+    return jsonify({'theme_name': theme_name, 'tokens': tokens})
+
+@app.route('/api/theme/presets', methods=['GET'])
+def api_theme_presets():
+    """Return all 10 curated presets with their full token sets."""
+    return jsonify(get_presets())
+
+@app.route('/api/theme', methods=['POST'])
+def api_theme_set():
+    """Update the active theme. Admin only."""
+    d = request.get_json(force=True)
+    user_id   = d.get('user_id')
+    user_role = d.get('user_role')
+    if user_role != 'admin':
+        return jsonify({'error': 'Admin only'}), 403
+    theme_name = d.get('theme_name', 'Custom').strip() or 'Custom'
+    tokens = d.get('tokens')
+    if not isinstance(tokens, dict) or not tokens:
+        return jsonify({'error': 'tokens must be a non-empty object'}), 400
+    # Only allow known token keys — reject arbitrary CSS injection
+    allowed = set(CARBON_BLUE_TOKENS.keys())
+    bad_keys = [k for k in tokens if k not in allowed]
+    if bad_keys:
+        return jsonify({'error': f'Unknown token keys: {bad_keys}'}), 400
+    # Merge with defaults so partial updates are safe
+    merged = dict(CARBON_BLUE_TOKENS)
+    merged.update(tokens)
+    try:
+        set_active_theme(theme_name, merged, updated_by=user_id)
+    except Exception as e:
+        logger.error(f"api_theme_set error: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+    return jsonify({'ok': True, 'theme_name': theme_name})
 
 
 # ---- Background Scheduler ----

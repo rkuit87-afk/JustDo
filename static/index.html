@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Mill Maintenance Terminal</title>
+<link rel="stylesheet" href="/theme.css">
 <style>
 
 /* == Toast notifications ================================== */
@@ -15,32 +16,15 @@
 .toast.blue{border-left:3px solid var(--blue)}
 /* == Reset ================================================ */
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:system-ui,-apple-system,sans-serif;background:#0f1117;color:#f1f5f9;min-height:100vh}
+body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg-base);color:var(--text-primary);min-height:100vh}
 button{cursor:pointer;font-family:inherit}
 input,select,textarea{font-family:inherit}
 /* == Screens ============================================== */
 .screen{display:none;min-height:100vh;flex-direction:column}
 .screen.active{display:flex}
-/* == CSS Variables ======================================== */
-:root{
-  --bg:#0F172A;
-  --surface:#1E293B;
-  --surface2:#334155;
-  --surface3:#475569;
-  --border:#475569;
-  --text:#F8FAFC;
-  --text2:#CBD5E1;
-  --text3:#94A3B8;
-  --blue:#2563EB;
-  --blue2:#1D4EDB;
-  --green:#10B981;
-  --red:#EF4444;
-  --amber:#F59E0B;
-  --purple:#a855f7;
-  --cyan:#06b6d4;
-  --gray:#64748B;
-  --brown:#92400e;
-}
+/* == CSS Variables — resolved via /theme.css (Flask route) */
+/* Legacy aliases are appended by the theme engine at serve time. */
+/* Nothing to declare here — kept as a marker for tooling. */
 /* == Login ================================================ */
 #login{background:var(--bg);align-items:center;justify-content:center}
 .login-box{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:40px;width:100%;max-width:520px}
@@ -148,7 +132,7 @@ input,select,textarea{font-family:inherit}
 .badge-amber{background:rgba(245,158,11,.15);color:var(--amber)}
 .badge-blue{background:rgba(59,130,246,.15);color:var(--blue)}
 .badge-purple{background:rgba(168,85,247,.15);color:var(--purple)}
-.badge-brown{background:rgba(146,64,14,.15);color:#b45309}
+.badge-brown{background:rgba(146,64,14,.15);color:var(--badge-brown-text)}
 /* Motivation hint — visible when textarea is empty (placeholder shown) */
 .pr-mot-hint{display:block;font-size:11px;font-weight:700;color:var(--amber);margin-top:5px}
 textarea:not(:placeholder-shown)+.pr-mot-hint{display:none}
@@ -167,8 +151,8 @@ textarea:not(:placeholder-shown)+.pr-mot-hint{display:none}
 .dispute-cols{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
 .dispute-col{background:var(--surface2);border-radius:8px;padding:10px}
 .dispute-col-title{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px}
-.dispute-col-title.sup{color:#93c5fd}
-.dispute-col-title.art{color:#86efac}
+.dispute-col-title.sup{color:var(--dispute-sup-color)}
+.dispute-col-title.art{color:var(--dispute-art-color)}
 .dispute-field{font-size:12px;color:var(--text2);margin-bottom:4px}
 .dispute-field span{color:var(--text);font-weight:600}
 /* == Task cards =========================================== */
@@ -191,6 +175,12 @@ textarea:not(:placeholder-shown)+.pr-mot-hint{display:none}
 .empty-state{text-align:center;padding:40px 20px;color:var(--text3);font-size:13px}
 .tag{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;background:var(--surface3);color:var(--text2);margin:1px}
 hr{border:none;border-top:1px solid var(--border);margin:12px 0}
+/* == Theme Engine preset cards ============================ */
+.theme-preset-card{background:var(--surface-1,var(--surface));border:1px solid var(--border-default,var(--border));border-radius:10px;padding:14px;cursor:pointer;transition:border-color .15s,background .15s;position:relative;user-select:none}
+.theme-preset-card:hover{border-color:var(--action-primary);background:var(--surface-2,var(--surface2))}
+.theme-preset-card.theme-preset-active{border-color:var(--action-primary);background:var(--accent-subtle,rgba(37,99,235,.12))}
+.theme-swatch-dot{width:18px;height:18px;border-radius:50%;border:1px solid rgba(255,255,255,0.12);flex-shrink:0;display:inline-block}
+.theme-active-badge{position:absolute;top:8px;right:8px;font-size:10px;font-weight:700;background:var(--action-primary);color:#fff;border-radius:4px;padding:2px 6px;text-transform:uppercase;letter-spacing:.05em}
 </style>
 </head>
 <body>
@@ -244,7 +234,7 @@ hr{border:none;border-top:1px solid var(--border);margin:12px 0}
         <button class="subrole-btn" onclick="loginSelectSubrole('Electrician',this)">Electricians</button>
         <button class="subrole-btn" onclick="loginSelectSubrole('Fitter',this)">Fitters</button>
         <button class="subrole-btn" onclick="loginSelectSubrole('Operator',this)">Operators</button>
-        <button class="subrole-btn" onclick="loginSelectSubrole('team_leader',this)" style="border-color:rgba(146,64,14,0.5);color:#b45309">Team Leaders</button>
+        <button class="subrole-btn" onclick="loginSelectSubrole('team_leader',this)" style="border-color:var(--role-team-leader-border);color:var(--role-team-leader-text)">Team Leaders</button>
       </div>
       <div class="section-title" style="margin-bottom:8px">Select your name</div>
       <div id="art-grid" class="user-grid"></div>
@@ -1142,6 +1132,7 @@ hr{border:none;border-top:1px solid var(--border);margin:12px 0}
     <div class="nav-tabs" style="border-radius:8px;margin-bottom:16px">
       <button class="nav-tab active" id="set-tab-system" onclick="showSettingsTab('system',this)">🖥️ System Settings</button>
       <button class="nav-tab" id="set-tab-maintenance" onclick="showSettingsTab('maintenance',this)">🔧 Maintenance Settings</button>
+      <button class="nav-tab" id="set-tab-theme" onclick="showSettingsTab('theme',this)">🎨 Theme</button>
     </div>
 
     <!-- ── SYSTEM SETTINGS ── -->
@@ -1317,6 +1308,44 @@ hr{border:none;border-top:1px solid var(--border);margin:12px 0}
           </div>
         </div>
         <button class="btn btn-primary btn-sm" onclick="saveSettings()">Save KPI Targets</button>
+      </div>
+    </div>
+
+    <!-- ── THEME SETTINGS ── -->
+    <div id="set-pane-theme" style="display:none">
+
+      <!-- Active theme banner -->
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
+          <div>
+            <div class="card-title" style="margin:0">Active Theme</div>
+            <div id="theme-active-name" style="font-size:20px;font-weight:700;margin-top:6px"></div>
+            <div id="theme-active-desc" style="font-size:13px;color:var(--text2);margin-top:3px"></div>
+          </div>
+          <div id="theme-active-swatches" style="display:flex;gap:6px;align-items:center"></div>
+        </div>
+      </div>
+
+      <!-- Preview confirmation bar — appears when a preset card is clicked -->
+      <div class="card" id="theme-preview-card" style="display:none;border-color:var(--action-primary)">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px">
+          <div>
+            <div style="font-weight:700;font-size:15px">Previewing — <span id="theme-preview-name"></span></div>
+            <div id="theme-preview-desc" style="font-size:13px;color:var(--text2);margin-top:3px"></div>
+          </div>
+          <div id="theme-preview-swatches" style="display:flex;gap:5px;align-items:center"></div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:14px">
+          <button class="btn btn-primary" onclick="applyPreviewedTheme()">✓ Apply Theme</button>
+          <button class="btn btn-ghost" onclick="cancelThemePreview()">✕ Cancel</button>
+        </div>
+      </div>
+
+      <!-- Preset grid -->
+      <div class="card">
+        <div class="card-title" style="margin-bottom:6px">Choose a Preset</div>
+        <div style="font-size:12px;color:var(--text3);margin-bottom:14px">Click a preset to preview live. Hit Apply to save it as the active theme for all users.</div>
+        <div id="theme-preset-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(185px,1fr));gap:12px"></div>
       </div>
     </div>
   </div>
@@ -1812,7 +1841,7 @@ function loginSelectRole(role) {
         btn.style.color = 'var(--red)';
       }
       const roleLabel = isStoresAdmin ? 'Stores Admin' : u.role;
-      const tagStyle = isStoresAdmin ? 'background:rgba(245,158,11,0.25);color:#b45309'
+      const tagStyle = isStoresAdmin ? 'background:var(--status-warning-bg);color:var(--status-warning-text)'
                      : isAdmin       ? 'background:rgba(239,68,68,0.2);color:var(--red)'
                      : '';
       btn.innerHTML = `${u.name}<span class="role-tag" style="${tagStyle}">${roleLabel}</span>`;
@@ -1855,7 +1884,7 @@ function loginSelectSubrole(subrole, btn) {
       btn.style.background = 'rgba(146,64,14,0.15)';
       btn.style.borderColor = 'rgba(146,64,14,0.5)';
     }
-    btn.innerHTML = `${u.name}<span class="role-tag" style="${isLeader ? 'background:rgba(146,64,14,0.25);color:#b45309' : ''}">${isLeader ? 'Team Leader' : (u.trade || 'Artisan')}</span>`;
+    btn.innerHTML = `${u.name}<span class="role-tag" style="${isLeader ? 'background:var(--role-team-leader-bg-subtle);color:var(--role-team-leader-text)' : ''}">${isLeader ? 'Team Leader' : (u.trade || 'Artisan')}</span>`;
     btn.onclick = () => selectUser(u);
     artGrid.appendChild(btn);
   });
@@ -4520,6 +4549,99 @@ function showSettingsTab(name, btn) {
     loadFailureModeList();
     loadSettingsSchedule();
   }
+  if (name === 'theme') loadThemePanel();
+}
+
+// ── Theme Engine UI ──────────────────────────────────────
+let _themePresets = [];
+let _themeActiveName = '';
+let _themePreviewPreset = null;
+let _themePreviewKeys = [];
+const _SWATCH_KEYS = ['bg-base','surface-1','action-primary','status-success','status-warning','status-critical'];
+
+function _buildSwatchRow(tokens) {
+  return _SWATCH_KEYS.map(k =>
+    `<span class="theme-swatch-dot" style="background:${tokens[k]||'#333'}" title="${k}"></span>`
+  ).join('');
+}
+
+async function loadThemePanel() {
+  const [active, presets] = await Promise.all([api('/api/theme'), api('/api/theme/presets')]);
+  if (!presets || !presets.length) return;
+  _themePresets = presets;
+  _themeActiveName = active ? active.theme_name : 'Carbon Blue';
+
+  const ap = presets.find(p => p.name === _themeActiveName) || presets[0];
+  document.getElementById('theme-active-name').textContent = _themeActiveName;
+  document.getElementById('theme-active-desc').textContent = ap.description || '';
+  document.getElementById('theme-active-swatches').innerHTML = _buildSwatchRow(ap.tokens);
+
+  document.getElementById('theme-preset-grid').innerHTML = presets.map((p, i) => {
+    const isActive = p.name === _themeActiveName;
+    return `<div class="theme-preset-card${isActive?' theme-preset-active':''}" data-name="${p.name}" onclick="previewTheme(${i})">
+      ${isActive?'<div class="theme-active-badge">Active</div>':''}
+      <div style="display:flex;gap:5px;margin-bottom:10px">${_buildSwatchRow(p.tokens)}</div>
+      <div style="font-weight:600;font-size:14px;color:var(--text)">${p.name}</div>
+      <div style="font-size:12px;color:var(--text2);margin-top:3px;line-height:1.4">${p.description}</div>
+    </div>`;
+  }).join('');
+}
+
+function previewTheme(idx) {
+  const preset = _themePresets[idx];
+  if (!preset) return;
+  // Remove previous preview
+  if (_themePreviewKeys.length) {
+    _themePreviewKeys.forEach(k => document.documentElement.style.removeProperty('--' + k));
+  }
+  _themePreviewPreset = preset;
+  _themePreviewKeys = Object.keys(preset.tokens);
+  // Apply live to :root
+  Object.entries(preset.tokens).forEach(([k, v]) => document.documentElement.style.setProperty('--' + k, v));
+  // Show confirmation bar
+  document.getElementById('theme-preview-name').textContent = preset.name;
+  document.getElementById('theme-preview-desc').textContent = preset.description || '';
+  document.getElementById('theme-preview-swatches').innerHTML = _buildSwatchRow(preset.tokens);
+  document.getElementById('theme-preview-card').style.display = '';
+  // Highlight card
+  document.querySelectorAll('.theme-preset-card').forEach(c => c.classList.toggle('theme-preset-active', c.dataset.name === preset.name));
+}
+
+function cancelThemePreview() {
+  _themePreviewKeys.forEach(k => document.documentElement.style.removeProperty('--' + k));
+  _themePreviewPreset = null;
+  _themePreviewKeys = [];
+  document.getElementById('theme-preview-card').style.display = 'none';
+  document.querySelectorAll('.theme-preset-card').forEach(c => c.classList.toggle('theme-preset-active', c.dataset.name === _themeActiveName));
+}
+
+async function applyPreviewedTheme() {
+  if (!_themePreviewPreset) return;
+  const preset = _themePreviewPreset;
+  const r = await api('/api/theme', 'POST', {
+    user_id: session.user.id, user_role: session.user.role,
+    theme_name: preset.name, tokens: preset.tokens
+  });
+  if (!r || !r.ok) { showToast('Failed to apply theme', 'red'); return; }
+  // Force CSS link re-fetch so subsequent page loads use new theme
+  const link = document.querySelector('link[href*="theme.css"]');
+  if (link) link.href = '/theme.css?t=' + Date.now();
+  // Update state (inline styles already show the new theme)
+  _themeActiveName = preset.name;
+  _themePreviewPreset = null;
+  _themePreviewKeys = [];
+  document.getElementById('theme-active-name').textContent = preset.name;
+  document.getElementById('theme-active-desc').textContent = preset.description || '';
+  document.getElementById('theme-active-swatches').innerHTML = _buildSwatchRow(preset.tokens);
+  document.getElementById('theme-preview-card').style.display = 'none';
+  document.querySelectorAll('.theme-preset-card').forEach(c => {
+    const isNow = c.dataset.name === preset.name;
+    c.classList.toggle('theme-preset-active', isNow);
+    const badge = c.querySelector('.theme-active-badge');
+    if (badge) badge.remove();
+    if (isNow) c.insertAdjacentHTML('afterbegin','<div class="theme-active-badge">Active</div>');
+  });
+  showToast('Theme applied: ' + preset.name, 'green');
 }
 
 // ── Equipment Management ─────────────────────────────────

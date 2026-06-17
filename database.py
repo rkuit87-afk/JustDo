@@ -2,6 +2,272 @@ import sqlite3, os, json, logging
 from datetime import datetime, date
 from contextlib import contextmanager
 
+# Default Carbon Blue token values — used to seed theme_settings on first run
+CARBON_BLUE_TOKENS = {
+    "bg-base": "#0F172A",
+    "bg-raised": "#141B2D",
+    "bg-sunken": "#080D19",
+    "surface-1": "#1E293B",
+    "surface-2": "#334155",
+    "surface-3": "#475569",
+    "text-primary": "#F8FAFC",
+    "text-secondary": "#CBD5E1",
+    "text-muted": "#94A3B8",
+    "text-inverse": "#0F172A",
+    "border-subtle": "#334155",
+    "border-default": "#475569",
+    "border-strong": "#64748B",
+    "action-primary": "#2563EB",
+    "action-primary-hover": "#1D4EDB",
+    "action-primary-active": "#1E40AF",
+    "action-secondary": "#334155",
+    "action-secondary-hover": "#475569",
+    "accent": "#2563EB",
+    "accent-subtle": "rgba(37,99,235,.12)",
+    "focus-ring": "rgba(37,99,235,.5)",
+    "status-success": "#10B981",
+    "status-success-bg": "rgba(16,185,129,.12)",
+    "status-success-border": "rgba(16,185,129,.3)",
+    "status-success-text": "#10B981",
+    "status-info": "#2563EB",
+    "status-info-bg": "rgba(37,99,235,.12)",
+    "status-info-border": "rgba(37,99,235,.3)",
+    "status-info-text": "#60A5FA",
+    "status-warning": "#F59E0B",
+    "status-warning-bg": "rgba(245,158,11,.12)",
+    "status-warning-border": "rgba(245,158,11,.3)",
+    "status-warning-text": "#F59E0B",
+    "status-critical": "#EF4444",
+    "status-critical-bg": "rgba(239,68,68,.12)",
+    "status-critical-border": "rgba(239,68,68,.3)",
+    "status-critical-text": "#EF4444",
+    "role-admin": "#EF4444",
+    "role-manager": "#F59E0B",
+    "role-supervisor": "#2563EB",
+    "role-artisan": "#10B981",
+    "role-team-leader": "#92400e",
+    "role-team-leader-text": "#b45309",
+    "role-team-leader-bg-subtle": "rgba(146,64,14,0.25)",
+    "role-team-leader-border": "rgba(146,64,14,0.5)",
+    "role-stores-admin": "#a855f7",
+    "dispute-sup-color": "#93c5fd",
+    "dispute-art-color": "#86efac",
+    "badge-brown-text": "#b45309",
+}
+
+# Curated theme presets — each entry supplies only the tokens that differ from
+# Carbon Blue. get_presets() merges these overrides against CARBON_BLUE_TOKENS
+# to produce the full 49-token set for each preset.
+_PRESET_OVERRIDES = [
+    {
+        "name": "Carbon Blue",
+        "description": "Default dark blue — precision and clarity.",
+        "tokens": {},
+    },
+    {
+        "name": "Carbon Crimson",
+        "description": "Red accent — high-alert industrial feel.",
+        "tokens": {
+            "action-primary":        "#DC2626",
+            "action-primary-hover":  "#B91C1C",
+            "action-primary-active": "#991B1B",
+            "action-secondary":      "#2D1515",
+            "action-secondary-hover":"#3D1A1A",
+            "accent":                "#DC2626",
+            "accent-subtle":         "rgba(220,38,38,.12)",
+            "focus-ring":            "rgba(220,38,38,.5)",
+            "status-info":           "#DC2626",
+            "status-info-bg":        "rgba(220,38,38,.12)",
+            "status-info-border":    "rgba(220,38,38,.3)",
+            "status-info-text":      "#FCA5A5",
+        },
+    },
+    {
+        "name": "Carbon Emerald",
+        "description": "Green accent — calm, operational, all-clear.",
+        "tokens": {
+            "action-primary":        "#059669",
+            "action-primary-hover":  "#047857",
+            "action-primary-active": "#065F46",
+            "action-secondary":      "#0D2B20",
+            "action-secondary-hover":"#143D2D",
+            "accent":                "#059669",
+            "accent-subtle":         "rgba(5,150,105,.12)",
+            "focus-ring":            "rgba(5,150,105,.5)",
+            "status-info":           "#059669",
+            "status-info-bg":        "rgba(5,150,105,.12)",
+            "status-info-border":    "rgba(5,150,105,.3)",
+            "status-info-text":      "#6EE7B7",
+        },
+    },
+    {
+        "name": "Midnight",
+        "description": "Deeper darks — eye comfort on long night shifts.",
+        "tokens": {
+            "bg-base":    "#060B14",
+            "bg-raised":  "#0A1120",
+            "bg-sunken":  "#030610",
+            "surface-1":  "#111827",
+            "surface-2":  "#1F2937",
+            "surface-3":  "#374151",
+            "border-subtle":  "#1F2937",
+            "border-default": "#374151",
+            "border-strong":  "#4B5563",
+        },
+    },
+    {
+        "name": "Slate",
+        "description": "Warm grey — neutral industrial, no colour cast.",
+        "tokens": {
+            "bg-base":    "#0F1117",
+            "bg-raised":  "#161B22",
+            "bg-sunken":  "#090C10",
+            "surface-1":  "#1C2128",
+            "surface-2":  "#2D333B",
+            "surface-3":  "#444C56",
+            "border-subtle":  "#2D333B",
+            "border-default": "#444C56",
+            "border-strong":  "#545D68",
+        },
+    },
+    {
+        "name": "Amber Workshop",
+        "description": "Warm amber accent — workshop, forge, machinery.",
+        "tokens": {
+            "action-primary":        "#D97706",
+            "action-primary-hover":  "#B45309",
+            "action-primary-active": "#92400E",
+            "action-secondary":      "#2A1D06",
+            "action-secondary-hover":"#3A2A0A",
+            "accent":                "#D97706",
+            "accent-subtle":         "rgba(217,119,6,.12)",
+            "focus-ring":            "rgba(217,119,6,.5)",
+            "status-info":           "#D97706",
+            "status-info-bg":        "rgba(217,119,6,.12)",
+            "status-info-border":    "rgba(217,119,6,.3)",
+            "status-info-text":      "#FCD34D",
+        },
+    },
+    {
+        "name": "High Contrast",
+        "description": "Pure black, maximum legibility — outdoor or bright-light use.",
+        "tokens": {
+            "bg-base":    "#000000",
+            "bg-raised":  "#0A0A0A",
+            "bg-sunken":  "#000000",
+            "surface-1":  "#111111",
+            "surface-2":  "#1A1A1A",
+            "surface-3":  "#2A2A2A",
+            "text-primary":   "#FFFFFF",
+            "text-secondary": "#E5E5E5",
+            "text-muted":     "#AAAAAA",
+            "text-inverse":   "#000000",
+            "border-subtle":  "#333333",
+            "border-default": "#444444",
+            "border-strong":  "#666666",
+        },
+    },
+    {
+        "name": "Ocean",
+        "description": "Teal-blue depths — calm focus, cooling energy.",
+        "tokens": {
+            "bg-base":    "#0C1A2E",
+            "bg-raised":  "#102035",
+            "bg-sunken":  "#071020",
+            "surface-1":  "#1A3044",
+            "surface-2":  "#234458",
+            "surface-3":  "#2E5870",
+            "border-subtle":  "#1A3044",
+            "border-default": "#234458",
+            "border-strong":  "#2E5870",
+            "action-primary":        "#0891B2",
+            "action-primary-hover":  "#0E7490",
+            "action-primary-active": "#155E75",
+            "action-secondary":      "#0C2233",
+            "action-secondary-hover":"#143044",
+            "accent":                "#0891B2",
+            "accent-subtle":         "rgba(8,145,178,.12)",
+            "focus-ring":            "rgba(8,145,178,.5)",
+            "status-info":           "#0891B2",
+            "status-info-bg":        "rgba(8,145,178,.12)",
+            "status-info-border":    "rgba(8,145,178,.3)",
+            "status-info-text":      "#7DD3FC",
+        },
+    },
+    {
+        "name": "Twilight",
+        "description": "Purple-blue — shift changeover, thoughtful review.",
+        "tokens": {
+            "bg-base":    "#13111A",
+            "bg-raised":  "#1A1724",
+            "bg-sunken":  "#0A0910",
+            "surface-1":  "#211D2E",
+            "surface-2":  "#312B45",
+            "surface-3":  "#44395C",
+            "border-subtle":  "#211D2E",
+            "border-default": "#312B45",
+            "border-strong":  "#44395C",
+            "action-primary":        "#7C3AED",
+            "action-primary-hover":  "#6D28D9",
+            "action-primary-active": "#5B21B6",
+            "action-secondary":      "#1E1533",
+            "action-secondary-hover":"#2A1D44",
+            "accent":                "#7C3AED",
+            "accent-subtle":         "rgba(124,58,237,.12)",
+            "focus-ring":            "rgba(124,58,237,.5)",
+            "status-info":           "#7C3AED",
+            "status-info-bg":        "rgba(124,58,237,.12)",
+            "status-info-border":    "rgba(124,58,237,.3)",
+            "status-info-text":      "#C4B5FD",
+        },
+    },
+    {
+        "name": "Forest",
+        "description": "Deep pine greens — organic, sustainable, earthy.",
+        "tokens": {
+            "bg-base":    "#0A1208",
+            "bg-raised":  "#0F1A0C",
+            "bg-sunken":  "#060B05",
+            "surface-1":  "#162110",
+            "surface-2":  "#1E3018",
+            "surface-3":  "#2A4022",
+            "border-subtle":  "#162110",
+            "border-default": "#1E3018",
+            "border-strong":  "#2A4022",
+            "action-primary":        "#16A34A",
+            "action-primary-hover":  "#15803D",
+            "action-primary-active": "#166534",
+            "action-secondary":      "#0D2515",
+            "action-secondary-hover":"#13341E",
+            "accent":                "#16A34A",
+            "accent-subtle":         "rgba(22,163,74,.12)",
+            "focus-ring":            "rgba(22,163,74,.5)",
+            "status-info":           "#16A34A",
+            "status-info-bg":        "rgba(22,163,74,.12)",
+            "status-info-border":    "rgba(22,163,74,.3)",
+            "status-info-text":      "#86EFAC",
+        },
+    },
+]
+
+def get_presets():
+    """Return the 10 curated presets as a list of {name, description, tokens} dicts.
+
+    Each preset's tokens dict is a full 49-token set — CARBON_BLUE_TOKENS merged
+    with that preset's overrides. Callers can pass tokens directly to set_active_theme.
+    """
+    result = []
+    for p in _PRESET_OVERRIDES:
+        full_tokens = dict(CARBON_BLUE_TOKENS)
+        full_tokens.update(p["tokens"])
+        result.append({
+            "name":        p["name"],
+            "description": p["description"],
+            "tokens":      full_tokens,
+        })
+    return result
+
+
 # ---- Logging Setup ----
 logger = logging.getLogger(__name__)
 
@@ -498,6 +764,15 @@ def init_db():
             resolved     INTEGER DEFAULT 0
         )''')
 
+        # Single-row table holding the active theme token set
+        c.execute('''CREATE TABLE IF NOT EXISTS theme_settings (
+            id         INTEGER PRIMARY KEY CHECK (id = 1),
+            theme_name TEXT    NOT NULL DEFAULT 'Carbon Blue',
+            tokens     TEXT    NOT NULL,
+            updated_at DATETIME,
+            updated_by INTEGER REFERENCES users(id)
+        )''')
+
         conn.commit()
         logger.info("Database schema initialized")
 
@@ -592,6 +867,19 @@ def _run_migrations():
         except Exception as e:
             logger.debug(f"Team leader role migration: {e}")
 
+        # Seed Carbon Blue defaults into theme_settings if the table is empty
+        try:
+            existing = conn.execute("SELECT id FROM theme_settings WHERE id=1").fetchone()
+            if not existing:
+                conn.execute(
+                    "INSERT INTO theme_settings (id, theme_name, tokens, updated_at) VALUES (1, ?, ?, ?)",
+                    ("Carbon Blue", json.dumps(CARBON_BLUE_TOKENS), datetime.now().isoformat())
+                )
+                conn.commit()
+                logger.debug("Theme seed: Carbon Blue defaults inserted")
+        except Exception as e:
+            logger.debug(f"Theme seed: {e}")
+
     # Add indexes for performance
     _add_indexes()
     logger.info("Migrations completed")
@@ -640,6 +928,45 @@ def set_setting(key, value):
         )
         conn.commit()
     logger.info(f"Setting updated: {key}")
+
+def get_active_theme():
+    """Return (theme_name, tokens_dict) for the active theme.
+
+    Falls back to Carbon Blue defaults if the row is missing or tokens
+    cannot be parsed — guarantees the caller always gets a usable dict.
+    """
+    try:
+        with get_db_context() as conn:
+            row = conn.execute(
+                "SELECT theme_name, tokens FROM theme_settings WHERE id=1"
+            ).fetchone()
+        if row:
+            return row['theme_name'], json.loads(row['tokens'])
+    except Exception as e:
+        logger.error(f"get_active_theme error: {e}", exc_info=True)
+    return "Carbon Blue", dict(CARBON_BLUE_TOKENS)
+
+def set_active_theme(theme_name, tokens, updated_by=None):
+    """Persist a new theme to theme_settings (single-row upsert).
+
+    Args:
+        theme_name: Display name, e.g. 'Carbon Blue'.
+        tokens: dict of CSS-property-name → value.
+        updated_by: user id of the admin making the change (optional).
+    """
+    with get_db_context() as conn:
+        conn.execute(
+            """INSERT INTO theme_settings (id, theme_name, tokens, updated_at, updated_by)
+               VALUES (1, ?, ?, ?, ?)
+               ON CONFLICT(id) DO UPDATE SET
+                 theme_name = excluded.theme_name,
+                 tokens     = excluded.tokens,
+                 updated_at = excluded.updated_at,
+                 updated_by = excluded.updated_by""",
+            (theme_name, json.dumps(tokens), datetime.now().isoformat(), updated_by)
+        )
+        conn.commit()
+    logger.info(f"Theme updated: {theme_name} by user_id={updated_by}")
 
 def seed_data():
     """Load initial seed data if database is empty."""

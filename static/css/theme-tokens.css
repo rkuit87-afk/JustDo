@@ -1,0 +1,105 @@
+/* =============================================================
+   JustDo Theme Engine — Token Schema
+   Active theme: Carbon Blue (default)
+   All values resolve to CSS custom properties on :root.
+   Templates reference tokens only — no raw hex in templates.
+   ============================================================= */
+
+:root {
+
+  /* === BACKGROUND HIERARCHY ================================ */
+  --bg-base:    #0F172A;   /* page canvas                    */
+  --bg-raised:  #141B2D;   /* slightly elevated (tooltips)   */
+  --bg-sunken:  #080D19;   /* inset / input backgrounds      */
+
+  /* === SURFACE HIERARCHY =================================== */
+  --surface-1:  #1E293B;   /* cards, panels                  */
+  --surface-2:  #334155;   /* nested surfaces, inputs        */
+  --surface-3:  #475569;   /* hover states, dividers         */
+
+  /* === TEXT ================================================ */
+  --text-primary:   #F8FAFC;
+  --text-secondary: #CBD5E1;
+  --text-muted:     #94A3B8;
+  --text-inverse:   #0F172A;  /* text on light/accent surfaces */
+
+  /* === BORDERS ============================================= */
+  --border-subtle:  #334155;
+  --border-default: #475569;
+  --border-strong:  #64748B;
+
+  /* === ACTION (PRIMARY) ==================================== */
+  --action-primary:        #2563EB;
+  --action-primary-hover:  #1D4EDB;
+  --action-primary-active: #1E40AF;
+  --action-secondary:      #334155;
+  --action-secondary-hover:#475569;
+
+  /* === ACCENT ============================================== */
+  --accent:        #2563EB;
+  --accent-subtle: rgba(37,99,235,.12);
+
+  /* === FOCUS RING ========================================== */
+  --focus-ring: rgba(37,99,235,.5);
+
+  /* === STATUS — semantic, never overridden by brand ======= */
+  --status-success:        #10B981;
+  --status-success-bg:     rgba(16,185,129,.12);
+  --status-success-border: rgba(16,185,129,.3);
+  --status-success-text:   #10B981;
+
+  --status-info:           #2563EB;
+  --status-info-bg:        rgba(37,99,235,.12);
+  --status-info-border:    rgba(37,99,235,.3);
+  --status-info-text:      #60A5FA;
+
+  --status-warning:        #F59E0B;
+  --status-warning-bg:     rgba(245,158,11,.12);
+  --status-warning-border: rgba(245,158,11,.3);
+  --status-warning-text:   #F59E0B;
+
+  --status-critical:        #EF4444;
+  --status-critical-bg:     rgba(239,68,68,.12);
+  --status-critical-border: rgba(239,68,68,.3);
+  --status-critical-text:   #EF4444;
+
+  /* === ROLE COLOURS — fixed semantic meanings ============== */
+  --role-admin:              #EF4444;
+  --role-manager:            #F59E0B;
+  --role-supervisor:         #2563EB;
+  --role-artisan:            #10B981;
+  --role-team-leader:        #92400e;
+  --role-team-leader-text:   #b45309;
+  --role-team-leader-bg-subtle: rgba(146,64,14,0.25);
+  --role-team-leader-border: rgba(146,64,14,0.5);
+  --role-stores-admin:       #a855f7;
+
+  /* === DISPUTE COLUMN TINTS ================================ */
+  --dispute-sup-color: #93c5fd;
+  --dispute-art-color: #86efac;
+
+  /* === BADGE TEXT (brown tone used in badge-brown) ========= */
+  --badge-brown-text: #b45309;
+
+  /* === LEGACY ALIASES ====================================== */
+  /* All existing CSS continues to work — these map old names  */
+  /* to new canonical tokens. Remove aliases in a future pass  */
+  /* once templates migrate to direct token references.        */
+  --bg:       var(--bg-base);
+  --surface:  var(--surface-1);
+  --surface2: var(--surface-2);
+  --surface3: var(--surface-3);
+  --border:   var(--border-default);
+  --text:     var(--text-primary);
+  --text2:    var(--text-secondary);
+  --text3:    var(--text-muted);
+  --blue:     var(--action-primary);
+  --blue2:    var(--action-primary-hover);
+  --green:    var(--status-success);
+  --red:      var(--status-critical);
+  --amber:    var(--status-warning);
+  --purple:   var(--role-stores-admin);
+  --cyan:     #06b6d4;
+  --gray:     #64748B;
+  --brown:    var(--role-team-leader);
+}
