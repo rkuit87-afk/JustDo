@@ -111,6 +111,21 @@ def get_users():
         logger.error(f"Error fetching users: {e}", exc_info=True)
         return jsonify({'status': 'error', 'message': 'Failed to fetch users'}), 500
 
+@app.route('/api/users/by-role/<role>')
+def get_users_by_role(role):
+    """Get active users filtered by role."""
+    try:
+        with get_db_context() as conn:
+            users = conn.execute(
+                "SELECT id,name,role,CASE WHEN pin IS NOT NULL THEN 1 ELSE 0 END as has_pin "
+                "FROM users WHERE active=1 AND role=? ORDER BY name",
+                (role,)
+            ).fetchall()
+            return jsonify([dict(u) for u in users])
+    except Exception as e:
+        logger.error(f"Error fetching users by role: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'message': 'Failed to fetch users'}), 500
+
 @app.route('/api/users/verify-pin', methods=['POST'])
 def verify_pin():
     """Verify user PIN."""
@@ -122,7 +137,7 @@ def verify_pin():
     try:
         with get_db_context() as conn:
             user = conn.execute(
-                "SELECT id,name,role FROM users WHERE id=? AND (pin=? OR pin IS NULL)",
+                "SELECT id,name,role,create_scope FROM users WHERE id=? AND (pin=? OR pin IS NULL)",
                 (d['user_id'], d['pin'])
             ).fetchone()
         
@@ -167,8 +182,11 @@ def add_user():
         return jsonify({'status': 'error', 'message': f'Valid name and role required. Valid roles: {valid_roles}'}), 400
 
     creator_role = d.get('creator_role', '')
+    creator_scope = d.get('creator_scope', '')
     if creator_role == 'stores_admin' and role not in ('picker', 'storeman'):
         return jsonify({'status': 'error', 'message': 'Stores admin can only add picker or storeman roles'}), 403
+    if creator_scope and role != creator_scope:
+        return jsonify({'status': 'error', 'message': f'You can only add {creator_scope} users'}), 403
 
     try:
         with get_db_context() as conn:
@@ -3206,6 +3224,201 @@ def api_theme_set():
         return jsonify({'error': str(e)}), 500
     return jsonify({'ok': True, 'theme_name': theme_name})
 
+
+# ============================================================
+# ---- Checklist Routes ----
+# ============================================================
+
+@app.route('/api/checklists')
+def get_checklists():
+    role = request.args.get('role', '')
+    try:
+        with get_db_context() as conn:
+            rows = conn.execute(
+                "SELECT id,name,description,target_roles FROM form_templates WHERE active=1 ORDER BY name"
+            ).fetchall()
+        result = []
+        for r in rows:
+            import json as _json
+            roles = _json.loads(r['target_roles'] or '[]')
+            if not role or role in roles or role == 'admin':
+                result.append({**dict(r), 'target_roles': roles})
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"get_checklists: {e}", exc_info=True)
+        return jsonify([])
+
+@app.route('/api/checklists', methods=['POST'])
+def create_checklist():
+    d = safe_json(request)
+    name = str(d.get('name', '')).strip()
+    if not name:
+        return jsonify({'status': 'error', 'message': 'Name required'}), 400
+    import json as _json
+    try:
+        with get_db_context() as conn:
+            conn.execute(
+                "INSERT INTO form_templates (name,description,target_roles) VALUES (?,?,?)",
+                (name, d.get('description', ''), _json.dumps(d.get('target_roles', ['admin'])))
+            )
+            conn.commit()
+        return jsonify({'status': 'ok'})
+    except Exception as e:
+        logger.error(f"create_checklist: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'message': 'Failed'}), 500
+
+@app.route('/api/checklists/<int:tid>', methods=['GET'])
+def get_checklist(tid):
+    try:
+        with get_db_context() as conn:
+            tmpl = conn.execute("SELECT * FROM form_templates WHERE id=?", (tid,)).fetchone()
+            fields = conn.execute(
+                "SELECT * FROM form_fields WHERE template_id=? ORDER BY sort_order", (tid,)
+            ).fetchall()
+        if not tmpl:
+            return jsonify({'status': 'error', 'message': 'Not found'}), 404
+        import json as _json
+        return jsonify({
+            **dict(tmpl),
+            'target_roles': _json.loads(tmpl['target_roles'] or '[]'),
+            'fields': [dict(f) for f in fields]
+        })
+    except Exception as e:
+        logger.error(f"get_checklist {tid}: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'message': 'Failed'}), 500
+
+@app.route('/api/checklists/<int:tid>', methods=['PUT'])
+def update_checklist(tid):
+    d = safe_json(request)
+    import json as _json
+    try:
+        with get_db_context() as conn:
+            fields, params = [], []
+            if 'name' in d:        fields.append('name=?');         params.append(d['name'])
+            if 'description' in d: fields.append('description=?');  params.append(d['description'])
+            if 'target_roles' in d:
+                fields.append('target_roles=?')
+                params.append(_json.dumps(d['target_roles']))
+            if not fields:
+                return jsonify({'status': 'error', 'message': 'Nothing to update'}), 400
+            params.append(tid)
+            conn.execute(f"UPDATE form_templates SET {','.join(fields)} WHERE id=?", params)
+            conn.commit()
+        return jsonify({'status': 'ok'})
+    except Exception as e:
+        logger.error(f"update_checklist {tid}: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'message': 'Failed'}), 500
+
+@app.route('/api/checklists/<int:tid>', methods=['DELETE'])
+def delete_checklist(tid):
+    try:
+        with get_db_context() as conn:
+            conn.execute("UPDATE form_templates SET active=0 WHERE id=?", (tid,))
+            conn.commit()
+        return jsonify({'status': 'ok'})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': 'Failed'}), 500
+
+@app.route('/api/checklists/<int:tid>/fields', methods=['POST'])
+def add_checklist_field(tid):
+    d = safe_json(request)
+    label = str(d.get('label', '')).strip()
+    if not label:
+        return jsonify({'status': 'error', 'message': 'Label required'}), 400
+    import re
+    field_key = d.get('field_key') or re.sub(r'[^a-z0-9_]', '_', label.lower())[:40]
+    try:
+        with get_db_context() as conn:
+            max_order = conn.execute(
+                "SELECT COALESCE(MAX(sort_order),0) FROM form_fields WHERE template_id=?", (tid,)
+            ).fetchone()[0]
+            conn.execute(
+                "INSERT INTO form_fields (template_id,field_key,label,field_type,unit,required,sort_order,is_calculated,calc_hint) VALUES (?,?,?,?,?,?,?,?,?)",
+                (tid, field_key, label,
+                 d.get('field_type', 'number'), d.get('unit', ''),
+                 int(d.get('required', 0)), max_order + 1,
+                 int(d.get('is_calculated', 0)), d.get('calc_hint'))
+            )
+            conn.commit()
+        return jsonify({'status': 'ok'})
+    except Exception as e:
+        logger.error(f"add_checklist_field {tid}: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'message': 'Failed'}), 500
+
+@app.route('/api/checklists/fields/<int:fid>', methods=['PUT'])
+def update_checklist_field(fid):
+    d = safe_json(request)
+    try:
+        with get_db_context() as conn:
+            fs, ps = [], []
+            for col in ('label', 'field_type', 'unit', 'calc_hint'):
+                if col in d: fs.append(f'{col}=?'); ps.append(d[col])
+            for col in ('required', 'is_calculated', 'sort_order'):
+                if col in d: fs.append(f'{col}=?'); ps.append(int(d[col]))
+            if not fs:
+                return jsonify({'status': 'error', 'message': 'Nothing to update'}), 400
+            ps.append(fid)
+            conn.execute(f"UPDATE form_fields SET {','.join(fs)} WHERE id=?", ps)
+            conn.commit()
+        return jsonify({'status': 'ok'})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': 'Failed'}), 500
+
+@app.route('/api/checklists/fields/<int:fid>', methods=['DELETE'])
+def delete_checklist_field(fid):
+    try:
+        with get_db_context() as conn:
+            conn.execute("DELETE FROM form_fields WHERE id=?", (fid,))
+            conn.commit()
+        return jsonify({'status': 'ok'})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': 'Failed'}), 500
+
+@app.route('/api/checklists/<int:tid>/submit', methods=['POST'])
+def submit_checklist(tid):
+    d = safe_json(request)
+    values = d.get('values', {})
+    sub_date = d.get('submission_date') or date.today().isoformat()
+    submitted_by = d.get('submitted_by')
+    submitted_by_name = d.get('submitted_by_name', '')
+    try:
+        with get_db_context() as conn:
+            cur = conn.execute(
+                "INSERT INTO form_submissions (template_id,submitted_by,submitted_by_name,submission_date,notes) VALUES (?,?,?,?,?)",
+                (tid, submitted_by, submitted_by_name, sub_date, d.get('notes', ''))
+            )
+            sub_id = cur.lastrowid
+            conn.executemany(
+                "INSERT INTO form_values (submission_id,field_key,value) VALUES (?,?,?)",
+                [(sub_id, k, str(v)) for k, v in values.items()]
+            )
+            conn.commit()
+        log_action(submitted_by_name or 'Unknown', 'checklist_submitted', f"Checklist {tid} submitted for {sub_date}")
+        return jsonify({'status': 'ok', 'submission_id': sub_id})
+    except Exception as e:
+        logger.error(f"submit_checklist {tid}: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'message': 'Failed'}), 500
+
+@app.route('/api/checklists/<int:tid>/history')
+def checklist_history(tid):
+    days = int(request.args.get('days', 30))
+    try:
+        with get_db_context() as conn:
+            subs = conn.execute(
+                "SELECT id,submission_date,submitted_by_name,submitted_at FROM form_submissions "
+                "WHERE template_id=? AND submission_date >= date('now',?) ORDER BY submission_date DESC",
+                (tid, f'-{days} days')
+            ).fetchall()
+            result = []
+            for s in subs:
+                vals = conn.execute(
+                    "SELECT field_key,value FROM form_values WHERE submission_id=?", (s['id'],)
+                ).fetchall()
+                result.append({**dict(s), 'values': {v['field_key']: v['value'] for v in vals}})
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"checklist_history {tid}: {e}", exc_info=True)
+        return jsonify([])
 
 # ---- Background Scheduler ----
 def background_scheduler():

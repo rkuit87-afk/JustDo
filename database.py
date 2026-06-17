@@ -1063,6 +1063,47 @@ def init_db():
         )''')
 
         # Single-row table holding the active theme token set
+        # Custom form templates (admin-defined, role-targeted)
+        c.execute('''CREATE TABLE IF NOT EXISTS form_templates (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            name         TEXT NOT NULL,
+            description  TEXT,
+            target_roles TEXT DEFAULT '["admin"]',
+            active       INTEGER DEFAULT 1,
+            created_by   INTEGER REFERENCES users(id),
+            created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+        )''')
+
+        c.execute('''CREATE TABLE IF NOT EXISTS form_fields (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            template_id   INTEGER NOT NULL REFERENCES form_templates(id),
+            field_key     TEXT NOT NULL,
+            label         TEXT NOT NULL,
+            field_type    TEXT NOT NULL DEFAULT 'number',
+            unit          TEXT,
+            required      INTEGER DEFAULT 0,
+            sort_order    INTEGER DEFAULT 0,
+            is_calculated INTEGER DEFAULT 0,
+            calc_hint     TEXT
+        )''')
+
+        c.execute('''CREATE TABLE IF NOT EXISTS form_submissions (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            template_id       INTEGER NOT NULL REFERENCES form_templates(id),
+            submitted_by      INTEGER REFERENCES users(id),
+            submitted_by_name TEXT,
+            submission_date   DATE NOT NULL,
+            submitted_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+            notes             TEXT
+        )''')
+
+        c.execute('''CREATE TABLE IF NOT EXISTS form_values (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            submission_id INTEGER NOT NULL REFERENCES form_submissions(id),
+            field_key     TEXT NOT NULL,
+            value         TEXT
+        )''')
+
         c.execute('''CREATE TABLE IF NOT EXISTS theme_settings (
             id         INTEGER PRIMARY KEY CHECK (id = 1),
             theme_name TEXT    NOT NULL DEFAULT 'Carbon Blue',
@@ -1164,6 +1205,55 @@ def _run_migrations():
             logger.debug("Team leader roles restored for ids 7, 8, 13")
         except Exception as e:
             logger.debug(f"Team leader role migration: {e}")
+
+        # Seed Boiler Daily Log checklist template
+        try:
+            existing = conn.execute("SELECT id FROM form_templates WHERE name='Boiler Daily Log'").fetchone()
+            if not existing:
+                cur = conn.execute(
+                    "INSERT INTO form_templates (name, description, target_roles) VALUES (?,?,?)",
+                    ("Boiler Daily Log",
+                     "Daily boiler operations — TDS readings, condensate & makeup water, salt/softener, lost time.",
+                     '["sawshop","admin"]')
+                )
+                tid = cur.lastrowid
+                fields = [
+                    ("b1_tds_morning",     "Boiler 1 — TDS Morning",          "number",   "ppm",  1, 0,  0, None),
+                    ("b1_tds_night",       "Boiler 1 — TDS Night",            "number",   "ppm",  1, 1,  0, None),
+                    ("b1_tds_highest",     "Boiler 1 — Highest TDS",          "number",   "ppm",  0, 2,  1, "max(b1_tds_morning,b1_tds_night)"),
+                    ("b1_blowdowns",       "Boiler 1 — Blowdowns",            "number",   "",     1, 3,  0, None),
+                    ("b2_tds_morning",     "Boiler 2 — TDS Morning",          "number",   "ppm",  1, 4,  0, None),
+                    ("b2_tds_night",       "Boiler 2 — TDS Night",            "number",   "ppm",  1, 5,  0, None),
+                    ("b2_tds_highest",     "Boiler 2 — Highest TDS",          "number",   "ppm",  0, 6,  1, "max(b2_tds_morning,b2_tds_night)"),
+                    ("b2_blowdowns",       "Boiler 2 — Blowdowns",            "number",   "",     1, 7,  0, None),
+                    ("b3_tds_morning",     "Boiler 3 — TDS Morning",          "number",   "ppm",  1, 8,  0, None),
+                    ("b3_tds_night",       "Boiler 3 — TDS Night",            "number",   "ppm",  1, 9,  0, None),
+                    ("b3_tds_highest",     "Boiler 3 — Highest TDS",          "number",   "ppm",  0, 10, 1, "max(b3_tds_morning,b3_tds_night)"),
+                    ("b3_blowdowns",       "Boiler 3 — Blowdowns",            "number",   "",     1, 11, 0, None),
+                    ("condensate_reading", "Condensate Meter Reading",         "number",   "m³", 1, 12, 0, None),
+                    ("condensate_daily",   "Condensate Daily (calculated)",    "number",   "m³", 0, 13, 1, "condensate_reading - prev_day(condensate_reading)"),
+                    ("makeup_reading",     "Makeup Water Meter Reading",       "number",   "m³", 1, 14, 0, None),
+                    ("makeup_daily",       "Makeup Daily (calculated)",        "number",   "m³", 0, 15, 1, "makeup_reading - prev_day(makeup_reading)"),
+                    ("daily_pct",          "Daily Condensate %",               "number",   "%",    0, 16, 1, "condensate_daily / makeup_daily * 100"),
+                    ("rolling_7day",       "7-Day Rolling Average",            "number",   "%",    0, 17, 1, "avg(daily_pct, last 7 submissions)"),
+                    ("month_pct",          "Month %",                          "number",   "%",    0, 18, 1, "month condensate / month makeup * 100"),
+                    ("softener_day",       "Softener Day",                     "number",   "bags", 1, 19, 0, None),
+                    ("softener_night",     "Softener Night",                   "number",   "bags", 1, 20, 0, None),
+                    ("salt_bags",          "Salt Bags (50 kg)",                "number",   "bags", 1, 21, 0, None),
+                    ("lost_time_mins",     "Lost Time",                        "number",   "mins", 0, 22, 0, None),
+                    ("downtime_incident",  "Downtime — Incident & Remedy",     "textarea", "",     0, 23, 0, None),
+                    ("operator_comments",  "Operator Comments / Items for Action", "textarea", "", 0, 24, 0, None),
+                ]
+                conn.executemany(
+                    "INSERT INTO form_fields "
+                    "(template_id,field_key,label,field_type,unit,required,sort_order,is_calculated,calc_hint) "
+                    "VALUES (?,?,?,?,?,?,?,?,?)",
+                    [(tid, f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7]) for f in fields]
+                )
+                conn.commit()
+                logger.info("Seeded Boiler Daily Log checklist template")
+        except Exception as e:
+            logger.debug(f"Boiler checklist seed: {e}")
 
         # Seed Carbon Blue defaults into theme_settings if the table is empty
         try:

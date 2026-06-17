@@ -78,7 +78,7 @@ input,select,textarea{font-family:inherit}
 .topbar-actions{display:flex;gap:8px;align-items:center}
 /* == Nav tabs ============================================= */
 .nav-tabs{background:var(--surface);border-bottom:1px solid var(--border);padding:0 16px;display:flex;gap:2px;overflow-x:auto;flex-shrink:0}
-.nav-tab{padding:12px 16px;font-size:13px;font-weight:600;color:var(--text3);background:transparent;border:none;border-bottom:2px solid transparent;white-space:nowrap;transition:all .15s}
+.nav-tab{padding:12px 16px;font-size:14px;font-weight:600;color:var(--text3);background:transparent;border:none;border-bottom:2px solid transparent;white-space:nowrap;transition:all .15s}
 .nav-tab:hover{color:var(--text)}
 .nav-tab.active{color:var(--blue);border-bottom-color:var(--blue)}
 /* == Plant hierarchy tree ====================================== */
@@ -323,6 +323,7 @@ hr{border:none;border-top:1px solid var(--border);margin:12px 0}
     <button class="nav-tab" onclick="showScreen('art-log-job',this)">I'll DoIt</button>
     <button class="nav-tab" onclick="showScreen('art-did',this);loadArtisanHistory()">DidIt</button>
     <button class="nav-tab" id="art-req-tab" style="display:none" onclick="showScreen('art-requisitions',this);loadMyRequisitions()">Requisitions</button>
+    <button class="nav-tab" id="art-checklists-tab" style="display:none" onclick="showScreen('art-checklists',this);loadArtisanChecklists()">📋 Checklists</button>
   </div>
   <div id="art-tasks" class="tab-pane active">
     <div id="art-tasks-list"></div>
@@ -394,6 +395,11 @@ hr{border:none;border-top:1px solid var(--border);margin:12px 0}
     </div>
     <div class="section-title">My Requisitions</div>
     <div id="sv-pr-list"></div>
+  </div>
+
+  <!-- Checklists (visible only when role has accessible templates) -->
+  <div id="art-checklists" class="tab-pane">
+    <div id="art-checklist-templates"></div>
   </div>
 </div>
 
@@ -544,6 +550,7 @@ hr{border:none;border-top:1px solid var(--border);margin:12px 0}
     <button class="nav-tab" onclick="showScreen('mgr-log',this)">Log Breakdown</button>
     <button class="nav-tab" onclick="showScreen('mgr-breakdowns',this)">Breakdowns</button>
     <button class="nav-tab" onclick="showScreen('mgr-requisitions',this);loadMyRequisitions()">📋 Requisitions</button>
+    <button class="nav-tab" id="mgr-team-tab" style="display:none" onclick="showScreen('mgr-team',this);loadMgrTeam()">👷 Team</button>
   </div>
   <div id="mgr-overview" class="tab-pane active">
     <div id="mgr-kpis"></div>
@@ -613,6 +620,27 @@ hr{border:none;border-top:1px solid var(--border);margin:12px 0}
     <div id="sv-pr-list"></div>
   </div>
 
+  <!-- Team tab (visible only when session.user.create_scope is set) -->
+  <div id="mgr-team" class="tab-pane">
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div class="card-title" style="margin:0">Team Members</div>
+        <button class="btn btn-ghost btn-xs" onclick="toggleMgrAddUser()">＋ Add Member</button>
+      </div>
+      <div id="mgr-add-user-form" style="display:none;margin-bottom:16px">
+        <div class="form-row"><label>Full Name</label>
+          <input id="mgr-new-user-name" placeholder="Surname, First name">
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
+          <button class="btn btn-primary btn-sm" onclick="mgrAddUser()">Add Member</button>
+          <button class="btn btn-ghost btn-sm" onclick="toggleMgrAddUser()">Cancel</button>
+          <span class="save-status" id="mgr-add-user-status"></span>
+        </div>
+      </div>
+      <div id="mgr-team-list"></div>
+    </div>
+  </div>
+
 </div>
 
 <!-- ===================== ADMIN ======================== -->
@@ -639,6 +667,7 @@ hr{border:none;border-top:1px solid var(--border);margin:12px 0}
     <button class="nav-tab" onclick="adTab('users',this)">Team</button>
     <button class="nav-tab" onclick="adTab('activity',this)">Activity</button>
     <button class="nav-tab" onclick="adTab('settings',this)">Settings</button>
+    <button class="nav-tab" onclick="adTab('checklists',this);loadAdminChecklists()">📋 Checklists</button>
     <button class="nav-tab" id="stores-nav-tab" style="display:none;color:var(--amber)" onclick="adTab('stores',this)">🏪 Stores</button>
     <button class="nav-tab" id="components-nav-tab" style="display:none;color:var(--blue)" onclick="adTab('components',this)">🔩 Components</button>
     <button class="nav-tab" id="req-handling-nav-tab" style="display:none;color:var(--purple)" onclick="adTab('reqhandling',this)">📋 Req. Handling</button>
@@ -1119,6 +1148,79 @@ hr{border:none;border-top:1px solid var(--border);margin:12px 0}
       <button class="btn btn-ghost btn-sm" onclick="loadReqHandling()">↻ Refresh</button>
     </div>
     <div id="rh-pr-list"></div>
+  </div>
+
+  <!-- Checklists -->
+  <div id="ad-tab-checklists" class="tab-pane">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <div style="font-size:15px;font-weight:700;color:var(--text)">Checklist Templates</div>
+      <button class="btn btn-primary btn-sm" onclick="showChecklistTemplateModal()">＋ New Template</button>
+    </div>
+    <div id="ad-checklist-list"></div>
+
+    <!-- Template create/edit modal -->
+    <div id="checklist-tmpl-modal" class="modal" style="display:none">
+      <div class="modal-box" style="max-width:480px">
+        <div class="modal-title" id="checklist-tmpl-modal-title">New Checklist Template</div>
+        <input type="hidden" id="cl-tmpl-id">
+        <div class="form-row"><label>Template Name *</label>
+          <input id="cl-tmpl-name" placeholder="e.g. Daily Safety Check">
+        </div>
+        <div class="form-row"><label>Description</label>
+          <input id="cl-tmpl-desc" placeholder="Short description of purpose">
+        </div>
+        <div class="form-row"><label>Who fills this in?</label>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px" id="cl-tmpl-roles">
+            <label style="display:flex;gap:4px;align-items:center;font-size:13px;cursor:pointer"><input type="checkbox" value="admin"> Admin</label>
+            <label style="display:flex;gap:4px;align-items:center;font-size:13px;cursor:pointer"><input type="checkbox" value="manager"> Manager</label>
+            <label style="display:flex;gap:4px;align-items:center;font-size:13px;cursor:pointer"><input type="checkbox" value="supervisor"> Supervisor</label>
+            <label style="display:flex;gap:4px;align-items:center;font-size:13px;cursor:pointer"><input type="checkbox" value="artisan"> Artisan</label>
+            <label style="display:flex;gap:4px;align-items:center;font-size:13px;cursor:pointer"><input type="checkbox" value="sawshop"> Sawshop</label>
+            <label style="display:flex;gap:4px;align-items:center;font-size:13px;cursor:pointer"><input type="checkbox" value="team_leader"> Team Leader</label>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:16px">
+          <button class="btn btn-primary btn-sm" onclick="saveChecklistTemplate()">Save</button>
+          <button class="btn btn-ghost btn-sm" onclick="closeChecklistTemplateModal()">Cancel</button>
+          <span class="save-status" id="cl-tmpl-status"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Field editor (shown inline below selected template card) -->
+    <div id="cl-field-editor" style="display:none;margin-top:16px">
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <div class="card-title" style="margin:0" id="cl-field-editor-title">Fields</div>
+          <button class="btn btn-ghost btn-xs" onclick="closeFieldEditor()">✕ Close</button>
+        </div>
+        <div id="cl-fields-list" style="margin-bottom:12px"></div>
+        <details style="margin-top:8px">
+          <summary style="font-size:13px;font-weight:600;color:var(--text2);cursor:pointer">＋ Add Field</summary>
+          <div style="margin-top:10px;display:grid;grid-template-columns:2fr 1fr 80px 80px auto;gap:6px;align-items:end">
+            <input id="cl-add-label" placeholder="Field label *" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-size:13px;outline:none">
+            <select id="cl-add-type" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:7px 8px;color:var(--text);font-size:13px;outline:none">
+              <option value="number">Number</option>
+              <option value="text">Text</option>
+              <option value="textarea">Textarea</option>
+              <option value="calculated">Calculated</option>
+            </select>
+            <input id="cl-add-unit" placeholder="Unit" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:7px 8px;color:var(--text);font-size:13px;outline:none">
+            <select id="cl-add-req" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:7px 8px;color:var(--text);font-size:13px;outline:none">
+              <option value="0">Optional</option>
+              <option value="1">Required</option>
+            </select>
+            <button class="btn btn-primary btn-sm" onclick="addChecklistField()">Add</button>
+          </div>
+          <input id="cl-add-calc-hint" placeholder="Formula / calculation description (for calculated fields)" style="margin-top:6px;width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-size:12px;outline:none">
+        </details>
+      </div>
+      <!-- History for this template -->
+      <div style="margin-top:12px">
+        <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:8px">Recent Submissions</div>
+        <div id="cl-history-list"></div>
+      </div>
+    </div>
   </div>
 
   <!-- Activity -->
@@ -2106,6 +2208,12 @@ async function showArtisanBoard() {
   const reqTab = document.getElementById('art-req-tab');
   if (reqTab) reqTab.style.display = session.user.role === 'team_leader' ? '' : 'none';
 
+  // Show Checklists tab if role has accessible templates (checked async)
+  api(`/api/checklists?role=${session.user.role}`).then(tmpls => {
+    const clTab = document.getElementById('art-checklists-tab');
+    if (clTab) clTab.style.display = (tmpls && tmpls.length) ? '' : 'none';
+  });
+
   // Populate equipment select
   const sel = document.getElementById('artself-equip');
   sel.innerHTML = '<option value="">Select equipment...</option>';
@@ -2838,6 +2946,10 @@ async function showManagerBoard() {
   document.getElementById('manager').classList.add('active');
   document.getElementById('mgr-username').textContent = session.user.name;
 
+  // Show Team tab only for users with a create_scope
+  const teamTab = document.getElementById('mgr-team-tab');
+  if (teamTab) teamTab.style.display = session.user.create_scope ? '' : 'none';
+
   // Populate artisan select
   populateArtisanDropdown('mgr-artisan');
 
@@ -2845,6 +2957,39 @@ async function showManagerBoard() {
   document.getElementById('mgr-equip').innerHTML = '<option value="">Select machine...</option>';
   loadMgrActiveBreakdowns();
   loadMgrOverview();
+}
+
+function toggleMgrAddUser() {
+  const f = document.getElementById('mgr-add-user-form');
+  f.style.display = f.style.display === 'none' ? 'block' : 'none';
+  if (f.style.display === 'block') document.getElementById('mgr-new-user-name').focus();
+}
+
+async function loadMgrTeam() {
+  const scope = session.user.create_scope;
+  if (!scope) return;
+  const users = await api(`/api/users/by-role/${scope}`) || [];
+  const el = document.getElementById('mgr-team-list');
+  if (!users.length) { el.innerHTML = '<div class="empty-state">No team members yet.</div>'; return; }
+  el.innerHTML = `<table class="data-table"><thead><tr><th>Name</th><th>Role</th><th>PIN Set</th></tr></thead><tbody>${
+    users.map(u => `<tr><td>${u.name}</td><td>${u.role}</td><td>${u.has_pin ? '✓' : '—'}</td></tr>`).join('')
+  }</tbody></table>`;
+}
+
+async function mgrAddUser() {
+  const name = document.getElementById('mgr-new-user-name').value.trim();
+  const scope = session.user.create_scope;
+  const st = document.getElementById('mgr-add-user-status');
+  if (!name) { st.textContent = 'Name required'; st.style.color = 'var(--red)'; return; }
+  const r = await api('/api/users', 'POST', { name, role: scope, creator_role: session.user.role, creator_scope: scope });
+  if (r && r.status === 'ok') {
+    st.textContent = 'Added'; st.style.color = 'var(--green)';
+    document.getElementById('mgr-new-user-name').value = '';
+    loadMgrTeam();
+    setTimeout(() => { st.textContent = ''; }, 2000);
+  } else {
+    st.textContent = r?.message || 'Failed'; st.style.color = 'var(--red)';
+  }
 }
 
 // ---- Manager inline equipment tree ----
@@ -6181,6 +6326,260 @@ async function savePB() {
     if (status) status.textContent = '';
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = 'Save Path'; }
+  }
+}
+
+// ============================================================
+// CHECKLIST SYSTEM — Admin management + Operator forms
+// ============================================================
+
+let _clActiveTid = null; // template id currently open in field editor
+
+// ── Admin: list all templates ────────────────────────────────
+async function loadAdminChecklists() {
+  const tmpls = await api('/api/checklists') || [];
+  const el = document.getElementById('ad-checklist-list');
+  if (!tmpls.length) {
+    el.innerHTML = '<div class="empty-state">No templates yet. Click "+ New Template" to create one.</div>';
+    return;
+  }
+  el.innerHTML = tmpls.map(t => `
+    <div class="card" style="margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div>
+          <div style="font-weight:700;color:var(--text)">${t.name}</div>
+          <div style="font-size:12px;color:var(--text3);margin-top:2px">${t.description || ''}</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:4px">Roles: ${(t.target_roles||[]).join(', ')}</div>
+        </div>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-ghost btn-xs" onclick="editChecklistTemplate(${t.id})">✏ Edit</button>
+          <button class="btn btn-ghost btn-xs" onclick="openFieldEditor(${t.id},'${escHtml(t.name)}')">Fields</button>
+          <button class="btn btn-ghost btn-xs" style="color:var(--red)" onclick="deleteChecklist(${t.id})">✕</button>
+        </div>
+      </div>
+    </div>`).join('');
+}
+
+// ── Admin: template create/edit modal ────────────────────────
+function showChecklistTemplateModal(tmpl) {
+  document.getElementById('cl-tmpl-id').value = tmpl ? tmpl.id : '';
+  document.getElementById('cl-tmpl-name').value = tmpl ? tmpl.name : '';
+  document.getElementById('cl-tmpl-desc').value = tmpl ? tmpl.description : '';
+  document.getElementById('checklist-tmpl-modal-title').textContent = tmpl ? 'Edit Template' : 'New Checklist Template';
+  const roles = tmpl ? (tmpl.target_roles || []) : [];
+  document.querySelectorAll('#cl-tmpl-roles input[type=checkbox]').forEach(cb => {
+    cb.checked = roles.includes(cb.value);
+  });
+  document.getElementById('cl-tmpl-status').textContent = '';
+  document.getElementById('checklist-tmpl-modal').style.display = 'flex';
+}
+function closeChecklistTemplateModal() { document.getElementById('checklist-tmpl-modal').style.display = 'none'; }
+
+async function editChecklistTemplate(tid) {
+  const t = await api(`/api/checklists/${tid}`);
+  if (t) showChecklistTemplateModal(t);
+}
+
+async function saveChecklistTemplate() {
+  const id = document.getElementById('cl-tmpl-id').value;
+  const name = document.getElementById('cl-tmpl-name').value.trim();
+  const desc = document.getElementById('cl-tmpl-desc').value.trim();
+  const roles = [...document.querySelectorAll('#cl-tmpl-roles input:checked')].map(c => c.value);
+  const st = document.getElementById('cl-tmpl-status');
+  if (!name) { st.textContent = 'Name required'; st.style.color='var(--red)'; return; }
+  const payload = { name, description: desc, target_roles: roles };
+  const r = id
+    ? await api(`/api/checklists/${id}`, 'PUT', payload)
+    : await api('/api/checklists', 'POST', payload);
+  if (r && r.status === 'ok') {
+    closeChecklistTemplateModal();
+    loadAdminChecklists();
+  } else {
+    st.textContent = r?.message || 'Failed'; st.style.color='var(--red)';
+  }
+}
+
+async function deleteChecklist(tid) {
+  if (!confirm('Archive this checklist template?')) return;
+  await api(`/api/checklists/${tid}`, 'DELETE');
+  loadAdminChecklists();
+  if (_clActiveTid === tid) closeFieldEditor();
+}
+
+// ── Admin: field editor ──────────────────────────────────────
+async function openFieldEditor(tid, name) {
+  _clActiveTid = tid;
+  document.getElementById('cl-field-editor-title').textContent = `Fields — ${name}`;
+  document.getElementById('cl-field-editor').style.display = 'block';
+  document.getElementById('cl-field-editor').scrollIntoView({behavior:'smooth'});
+  await refreshFieldList(tid);
+  await loadChecklistHistory(tid);
+}
+function closeFieldEditor() {
+  _clActiveTid = null;
+  document.getElementById('cl-field-editor').style.display = 'none';
+}
+
+async function refreshFieldList(tid) {
+  const t = await api(`/api/checklists/${tid}`);
+  const fields = t?.fields || [];
+  const el = document.getElementById('cl-fields-list');
+  if (!fields.length) { el.innerHTML = '<div style="color:var(--text3);font-size:13px">No fields yet.</div>'; return; }
+  el.innerHTML = `<table class="data-table"><thead><tr><th>#</th><th>Label</th><th>Type</th><th>Unit</th><th>Req</th><th>Calc</th><th></th></tr></thead><tbody>${
+    fields.map((f,i) => `<tr>
+      <td style="color:var(--text3)">${i+1}</td>
+      <td>${escHtml(f.label)}</td>
+      <td style="color:var(--text3)">${f.field_type}</td>
+      <td style="color:var(--text3)">${f.unit||'—'}</td>
+      <td>${f.required ? '✓' : ''}</td>
+      <td style="font-size:11px;color:var(--text3);max-width:160px;overflow:hidden;text-overflow:ellipsis" title="${escHtml(f.calc_hint||'')}">
+        ${f.is_calculated ? (f.calc_hint || '?') : ''}</td>
+      <td><button class="btn btn-ghost btn-xs" style="color:var(--red)" onclick="deleteChecklistField(${f.id})">✕</button></td>
+    </tr>`).join('')
+  }</tbody></table>`;
+}
+
+async function addChecklistField() {
+  if (!_clActiveTid) return;
+  const label = document.getElementById('cl-add-label').value.trim();
+  const type  = document.getElementById('cl-add-type').value;
+  const unit  = document.getElementById('cl-add-unit').value.trim();
+  const req   = document.getElementById('cl-add-req').value;
+  const calc  = document.getElementById('cl-add-calc-hint').value.trim();
+  if (!label) { showToast('Label required','red'); return; }
+  const r = await api(`/api/checklists/${_clActiveTid}/fields`, 'POST', {
+    label, field_type: type, unit, required: parseInt(req),
+    is_calculated: type === 'calculated' ? 1 : 0, calc_hint: calc || null
+  });
+  if (r?.status === 'ok') {
+    document.getElementById('cl-add-label').value = '';
+    document.getElementById('cl-add-unit').value = '';
+    document.getElementById('cl-add-calc-hint').value = '';
+    refreshFieldList(_clActiveTid);
+  } else showToast(r?.message || 'Failed','red');
+}
+
+async function deleteChecklistField(fid) {
+  if (!confirm('Remove this field?')) return;
+  await api(`/api/checklists/fields/${fid}`, 'DELETE');
+  if (_clActiveTid) refreshFieldList(_clActiveTid);
+}
+
+// ── Admin: template history ──────────────────────────────────
+async function loadChecklistHistory(tid) {
+  const subs = await api(`/api/checklists/${tid}/history?days=30`) || [];
+  const el = document.getElementById('cl-history-list');
+  if (!subs.length) { el.innerHTML = '<div class="empty-state">No submissions in the last 30 days.</div>'; return; }
+  el.innerHTML = `<table class="data-table"><thead><tr><th>Date</th><th>Submitted By</th><th>Fields</th></tr></thead><tbody>${
+    subs.map(s => `<tr>
+      <td>${s.submission_date}</td>
+      <td>${s.submitted_by_name||'—'}</td>
+      <td style="font-size:11px;color:var(--text3)">${Object.entries(s.values).map(([k,v])=>`${k}: ${v}`).join(' · ')}</td>
+    </tr>`).join('')
+  }</tbody></table>`;
+}
+
+// ── Operator (artisan board): load accessible checklists ─────
+async function loadArtisanChecklists() {
+  const tmpls = await api(`/api/checklists?role=${session.user.role}`) || [];
+  const el = document.getElementById('art-checklist-templates');
+  if (!tmpls.length) { el.innerHTML = '<div class="empty-state">No checklists available for your role.</div>'; return; }
+  el.innerHTML = '';
+  for (const t of tmpls) {
+    const div = document.createElement('div');
+    div.innerHTML = await renderChecklistForm(t.id, t.name);
+    el.appendChild(div);
+  }
+}
+
+async function renderChecklistForm(tid, name) {
+  const t = await api(`/api/checklists/${tid}`);
+  if (!t) return '<div class="card">Failed to load checklist.</div>';
+  const fields = t.fields || [];
+  const today = new Date().toISOString().split('T')[0];
+  const fieldHtml = fields.map(f => {
+    if (f.is_calculated) {
+      return `<div class="form-row">
+        <label>${escHtml(f.label)}${f.unit ? ` <span style="color:var(--text3);font-size:11px">(${f.unit})</span>` : ''} <span style="font-size:10px;color:var(--text3);font-style:italic">auto</span></label>
+        <input id="cl-field-${tid}-${f.field_key}" type="number" step="any" readonly style="background:var(--surface3);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text2);font-size:13px;outline:none;width:100%">
+      </div>`;
+    }
+    if (f.field_type === 'textarea') {
+      return `<div class="form-row">
+        <label>${escHtml(f.label)}${f.required ? ' *' : ''}</label>
+        <textarea id="cl-field-${tid}-${f.field_key}" placeholder="Enter ${f.label.toLowerCase()}..." style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:13px;outline:none;width:100%;min-height:70px;resize:vertical"></textarea>
+      </div>`;
+    }
+    if (f.field_type === 'text') {
+      return `<div class="form-row">
+        <label>${escHtml(f.label)}${f.required ? ' *' : ''}${f.unit ? ` <span style="color:var(--text3);font-size:11px">(${f.unit})</span>` : ''}</label>
+        <input id="cl-field-${tid}-${f.field_key}" type="text" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:13px;outline:none;width:100%">
+      </div>`;
+    }
+    return `<div class="form-row">
+      <label>${escHtml(f.label)}${f.required ? ' *' : ''}${f.unit ? ` <span style="color:var(--text3);font-size:11px">(${f.unit})</span>` : ''}</label>
+      <input id="cl-field-${tid}-${f.field_key}" type="number" step="any"
+        oninput="clAutoCalc(${tid})"
+        style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:13px;outline:none;width:100%">
+    </div>`;
+  }).join('');
+
+  return `<div class="card" style="margin-bottom:12px" id="cl-form-card-${tid}">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div class="card-title" style="margin:0">${escHtml(name)}</div>
+      <input type="date" id="cl-date-${tid}" value="${today}" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--text);font-size:13px;outline:none">
+    </div>
+    ${fieldHtml}
+    <div style="display:flex;gap:8px;align-items:center;margin-top:12px">
+      <button class="btn btn-primary btn-sm" onclick="submitChecklistForm(${tid})">Submit</button>
+      <span class="save-status" id="cl-submit-status-${tid}"></span>
+    </div>
+  </div>`;
+}
+
+function clAutoCalc(tid) {
+  const g = key => parseFloat(document.getElementById(`cl-field-${tid}-${key}`)?.value) || 0;
+  const s = (key, val) => { const el = document.getElementById(`cl-field-${tid}-${key}`); if (el) el.value = isNaN(val) || !isFinite(val) ? '' : val.toFixed(1); };
+  // TDS highest per boiler
+  s('b1_tds_highest', Math.max(g('b1_tds_morning'), g('b1_tds_night')));
+  s('b2_tds_highest', Math.max(g('b2_tds_morning'), g('b2_tds_night')));
+  s('b3_tds_highest', Math.max(g('b3_tds_morning'), g('b3_tds_night')));
+  // Condensate % (daily values entered directly for now)
+  const cd = g('condensate_daily'), mk = g('makeup_daily');
+  if (mk > 0) s('daily_pct', cd / mk * 100);
+}
+
+async function submitChecklistForm(tid) {
+  const t = await api(`/api/checklists/${tid}`);
+  const fields = t?.fields || [];
+  const values = {};
+  let missing = [];
+  for (const f of fields) {
+    const el = document.getElementById(`cl-field-${tid}-${f.field_key}`);
+    if (!el) continue;
+    const v = el.value.trim();
+    if (f.required && !v) { missing.push(f.label); continue; }
+    if (v !== '') values[f.field_key] = v;
+  }
+  const st = document.getElementById(`cl-submit-status-${tid}`);
+  if (missing.length) { st.textContent = `Required: ${missing.join(', ')}`; st.style.color='var(--red)'; return; }
+  st.textContent = 'Saving…'; st.style.color='var(--text3)';
+  const r = await api(`/api/checklists/${tid}/submit`, 'POST', {
+    values,
+    submission_date: document.getElementById(`cl-date-${tid}`)?.value,
+    submitted_by: session.user.id,
+    submitted_by_name: session.user.name
+  });
+  if (r?.status === 'ok') {
+    st.textContent = 'Submitted ✓'; st.style.color='var(--green)';
+    // Clear number inputs
+    fields.forEach(f => {
+      const el = document.getElementById(`cl-field-${tid}-${f.field_key}`);
+      if (el && !f.is_calculated) el.value = '';
+    });
+    setTimeout(() => { st.textContent = ''; }, 3000);
+  } else {
+    st.textContent = r?.message || 'Failed'; st.style.color='var(--red)';
   }
 }
 </script>
