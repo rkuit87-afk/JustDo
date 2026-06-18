@@ -61,6 +61,15 @@ input,select,textarea{font-family:inherit}
 .login-step{display:none}
 .login-step.active{display:block}
 /* == PIN modal ============================================ */
+/* == Job Card Floating Popups ============================= */
+.jc-popup{position:fixed;width:360px;background:var(--surface);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,.45);overflow:hidden;min-height:100px;pointer-events:auto}
+.jc-popup-header{display:flex;align-items:center;gap:8px;padding:10px 14px;background:var(--surface2);border-bottom:1px solid var(--border);cursor:grab;user-select:none}
+.jc-popup-header:active{cursor:grabbing}
+.jc-popup-body{padding:14px;max-height:440px;overflow-y:auto}
+.jc-popup-row{display:flex;gap:10px;margin-bottom:8px;font-size:12px;align-items:flex-start}
+.jc-lbl{color:var(--text3);min-width:80px;flex-shrink:0}
+.jc-section{font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin:10px 0 6px}
+/* == Modal overlay ======================================== */
 .modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:100;align-items:center;justify-content:center}
 .modal-overlay.open{display:flex}
 .modal{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:28px;width:100%;max-width:400px}
@@ -567,7 +576,7 @@ hr{border:none;border-top:1px solid var(--border);margin:12px 0}
 <div id="manager" class="screen">
   <div class="topbar">
     <div>
-      <div class="topbar-title">Manager Dashboard</div>
+      <div class="topbar-title" id="mgr-board-title">Manager Dashboard</div>
       <div class="topbar-user" id="mgr-username"></div>
     </div>
     <div class="topbar-actions">
@@ -882,7 +891,32 @@ hr{border:none;border-top:1px solid var(--border);margin:12px 0}
 
   <!-- Schedule -->
   <div id="ad-tab-schedule" class="tab-pane active">
-    <div id="ad-schedule-list"></div>
+    <div class="nav-tabs" style="border-radius:8px;margin-bottom:14px">
+      <button class="nav-tab active" id="sched-sub-pm" onclick="showScheduleSection('pm',this)">📅 PM Schedule</button>
+      <button class="nav-tab" id="sched-sub-jc" onclick="showScheduleSection('jc',this)">📋 Job Cards</button>
+    </div>
+    <div id="sched-section-pm">
+      <div id="ad-schedule-list"></div>
+    </div>
+    <div id="sched-section-jc" style="display:none">
+      <div class="nav-tabs" style="border-radius:8px;margin-bottom:12px">
+        <button class="nav-tab active" id="jc-range-all" onclick="loadJobCards('all',this)">All</button>
+        <button class="nav-tab" id="jc-range-today" onclick="loadJobCards('today',this)">Today</button>
+        <button class="nav-tab" id="jc-range-week" onclick="loadJobCards('week',this)">This Week</button>
+        <button class="nav-tab" id="jc-range-month" onclick="loadJobCards('month',this)">This Month</button>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center">
+        <select id="jc-filter-area" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--text);font-size:12px;outline:none" onchange="refreshJobCards()">
+          <option value="">All Areas</option>
+        </select>
+        <select id="jc-filter-type" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--text);font-size:12px;outline:none" onchange="refreshJobCards()">
+          <option value="">All Types</option>
+          <option value="PM">PM Tasks</option>
+          <option value="breakdown">Breakdowns</option>
+        </select>
+      </div>
+      <div id="jc-list"></div>
+    </div>
   </div>
 
   <!-- Allocate -->
@@ -1982,6 +2016,7 @@ async function submitPR() {
     equipment_id:     equipId ? parseInt(equipId) : null,
     motivation,
     is_special_order: anySpecial,
+    source_domain:    session.user.role === 'sawshop_admin' ? 'sawshop' : null,
     items,
   });
   if (r?.status === 'ok') {
@@ -2151,11 +2186,7 @@ function loginSelectRole(role) {
       filtered = allUsers.filter(u => u.role === 'admin' || u.role === 'stores_admin');
     } else if (role === 'sawshop') {
       step3Title.textContent = '🪚 Sawshop';
-      filtered = allUsers.filter(u =>
-        u.role === 'sawshop' ||
-        u.name.toLowerCase().includes('botha, stefan') ||
-        u.name.toLowerCase().includes('stefan botha')
-      );
+      filtered = allUsers.filter(u => u.role === 'sawshop' || u.role === 'sawshop_admin');
     } else if (role === 'store') {
       step3Title.textContent = '📦 Store Staff';
       filtered = allUsers.filter(u => u.role === 'picker' || u.role === 'storeman');
@@ -2355,6 +2386,7 @@ function loginUser(u) {
   else if (u.role === 'manager') showManagerBoard();
   else if (u.role === 'admin') showAdminBoard();
   else if (u.role === 'stores_admin') showStoresAdminBoard();
+  else if (u.role === 'sawshop_admin') showSawshopAdminBoard();
   else if (u.role === 'store_picker' || u.role === 'picker' || u.role === 'storeman') showPickerBoard();
 }
 
@@ -2409,7 +2441,7 @@ function adTab(name, btn) {
   if (name === 'activity') loadActivity();
   if (name==='disputes') loadDisputes();
   if (name==='requests') loadRequests('requests-wrap', true);
-  if (name==='schedule') loadSchedule();
+  if (name==='schedule') { loadSchedule(); showScheduleSection('pm', document.getElementById('sched-sub-pm')); }
   if (name==='allocate') loadUnallocatedJobs();
   if (name==='compliance') { loadCompliance(); loadGauges(); }
   if (name==='pushed') loadPushedJobs();
@@ -3194,10 +3226,16 @@ async function showManagerBoard() {
   const scoped = !!session.user.create_scope;
 
   // Sawshop manager: hide all mill-floor tabs, show only Team + Checklists
-  ['mgr-overview-tab','mgr-log-tab','mgr-breakdowns-tab','mgr-requisitions-tab'].forEach(id => {
+  const millOnlyTabs = ['mgr-overview-tab','mgr-log-tab','mgr-breakdowns-tab','mgr-requisitions-tab'];
+  millOnlyTabs.forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.display = scoped ? 'none' : '';
   });
+  // sawshop_admin also gets the Requisitions tab (to raise PRs to stores)
+  if (session.user.role === 'sawshop_admin') {
+    const reqTab = document.getElementById('mgr-requisitions-tab');
+    if (reqTab) reqTab.style.display = '';
+  }
   const teamTab = document.getElementById('mgr-team-tab');
   if (teamTab) teamTab.style.display = scoped ? '' : 'none';
   const mgrClTab = document.getElementById('mgr-checklists-tab');
@@ -3223,6 +3261,183 @@ async function showManagerBoard() {
     loadMgrActiveBreakdowns();
     loadMgrOverview();
   }
+}
+
+// ── Sawshop Admin Board ───────────────────────────────────────
+
+async function showSawshopAdminBoard() {
+  // Ensure create_scope is set — sawshop_admin always manages sawshop domain
+  if (!session.user.create_scope) session.user.create_scope = 'sawshop';
+  showManagerBoard();
+  const title = document.getElementById('mgr-board-title');
+  if (title) title.textContent = 'Sawshop Admin';
+  populatePREquip();
+}
+
+// ── Sawshop Admin Checklist Management ───────────────────────
+
+async function loadSaChecklistAdmin(el) {
+  const tmpls = await api('/api/ss/checklists') || [];
+  let html = `
+    <div class="card" style="margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div class="card-title" style="margin:0">📋 Sawshop Checklist Templates</div>
+        <button class="btn btn-primary btn-sm" onclick="openSaNewTemplateForm()">＋ New Template</button>
+      </div>
+      <div id="sa-new-tmpl-form" style="display:none;background:var(--surface2);border-radius:8px;padding:12px;margin-bottom:12px">
+        <div class="form-row"><label>Template Name *</label>
+          <input id="sa-tmpl-name" placeholder="e.g. Daily Blade Inspection">
+        </div>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button class="btn btn-primary btn-sm" onclick="createSaTemplate()">Create</button>
+          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('sa-new-tmpl-form').style.display='none'">Cancel</button>
+          <span class="save-status" id="sa-tmpl-status"></span>
+        </div>
+      </div>`;
+  if (!tmpls.length) {
+    html += '<div class="empty-state">No sawshop templates yet. Create one above.</div>';
+  } else {
+    html += tmpls.map(t => `
+      <div class="card" style="margin-bottom:10px;padding:12px">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <div style="font-weight:700;color:var(--text)">${escHtml(t.name)}</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:2px">${t.field_count||0} field${(t.field_count||0)!==1?'s':''}</div>
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <button class="btn btn-ghost btn-xs" onclick="openSaTemplateFields(${t.id},'${escHtml(t.name).replace(/'/g,"\\'")}')">⚙ Fields</button>
+            <button class="btn btn-ghost btn-xs" onclick="openSaChecklistFill(${t.id},'${escHtml(t.name).replace(/'/g,"\\'")}')">📝 Fill</button>
+            <button class="btn btn-ghost btn-xs" onclick="openSaChecklistHistory(${t.id},'${escHtml(t.name).replace(/'/g,"\\'")}')">📊 History</button>
+            <button class="btn btn-ghost btn-xs" style="color:var(--red)" onclick="deleteSaTemplate(${t.id})">✕</button>
+          </div>
+        </div>
+      </div>`).join('');
+  }
+  html += '</div>';
+  el.innerHTML = html;
+}
+
+function openSaNewTemplateForm() {
+  const f = document.getElementById('sa-new-tmpl-form');
+  if (!f) return;
+  f.style.display = f.style.display === 'none' ? 'block' : 'none';
+  if (f.style.display === 'block') document.getElementById('sa-tmpl-name')?.focus();
+}
+
+async function createSaTemplate() {
+  const name = document.getElementById('sa-tmpl-name')?.value.trim() || '';
+  const st = document.getElementById('sa-tmpl-status');
+  if (!name) { st.textContent = 'Name required'; st.style.color = 'var(--red)'; return; }
+  const r = await api('/api/ss/checklists', 'POST', { name });
+  if (r && r.status === 'ok') {
+    document.getElementById('sa-tmpl-name').value = '';
+    document.getElementById('sa-new-tmpl-form').style.display = 'none';
+    loadMgrChecklists();
+  } else {
+    st.textContent = 'Failed'; st.style.color = 'var(--red)';
+  }
+}
+
+async function deleteSaTemplate(tid) {
+  if (!confirm('Delete this template? This cannot be undone.')) return;
+  await api(`/api/ss/checklists/${tid}`, 'DELETE');
+  loadMgrChecklists();
+}
+
+async function openSaTemplateFields(tid, name) {
+  document.getElementById('sa-fields-title').textContent = `Fields — ${name}`;
+  document.getElementById('sa-fields-tid').value = tid;
+  document.getElementById('sa-field-label').value = '';
+  document.getElementById('sa-field-status').textContent = '';
+  await loadSaFields(tid);
+  document.getElementById('sa-fields-modal').style.display = 'flex';
+}
+
+async function loadSaFields(tid) {
+  const fields = await api(`/api/ss/checklists/${tid}/fields`) || [];
+  const el = document.getElementById('sa-fields-list');
+  if (!fields.length) { el.innerHTML = '<div style="color:var(--text3);font-size:13px;padding:8px 0">No fields yet — add one below.</div>'; return; }
+  el.innerHTML = `<table class="data-table" style="font-size:12px"><thead><tr><th>#</th><th>Label</th><th>Type</th></tr></thead><tbody>${
+    fields.map(f => `<tr><td>${f.field_order||'-'}</td><td>${escHtml(f.label)}</td><td style="color:var(--text3)">${f.field_type||'text'}</td></tr>`).join('')
+  }</tbody></table>`;
+}
+
+async function addSaField() {
+  const tid = document.getElementById('sa-fields-tid').value;
+  const label = document.getElementById('sa-field-label').value.trim();
+  const type = document.getElementById('sa-field-type').value;
+  const st = document.getElementById('sa-field-status');
+  if (!label) { st.textContent = 'Label required'; st.style.color = 'var(--red)'; return; }
+  const r = await api(`/api/ss/checklists/${tid}/fields`, 'POST', { label, field_type: type });
+  if (r && r.status === 'ok') {
+    document.getElementById('sa-field-label').value = '';
+    st.textContent = 'Added'; st.style.color = 'var(--green)';
+    loadSaFields(tid);
+    setTimeout(() => { st.textContent = ''; }, 2000);
+  } else {
+    st.textContent = 'Failed'; st.style.color = 'var(--red)';
+  }
+}
+
+async function openSaChecklistFill(tid, name) {
+  const fields = await api(`/api/ss/checklists/${tid}/fields`) || [];
+  if (!fields.length) { showToast('No fields in this template — add fields first.', 'amber'); return; }
+  document.getElementById('sa-fill-title').textContent = `Fill — ${name}`;
+  document.getElementById('sa-fill-tid').value = tid;
+  document.getElementById('sa-fill-status').textContent = '';
+  const container = document.getElementById('sa-fill-fields');
+  container.innerHTML = fields.map(f => `
+    <div class="form-row">
+      <label>${escHtml(f.label)}</label>
+      ${f.field_type === 'checkbox'
+        ? `<input type="checkbox" id="sa-fill-f-${f.id}" style="width:20px;height:20px;cursor:pointer">`
+        : `<input id="sa-fill-f-${f.id}" placeholder="${escHtml(f.label)}">`
+      }
+    </div>`).join('');
+  document.getElementById('sa-fill-modal').style.display = 'flex';
+}
+
+async function submitSaChecklist() {
+  const tid = document.getElementById('sa-fill-tid').value;
+  const inputs = document.querySelectorAll('#sa-fill-fields input');
+  const answers = {};
+  inputs.forEach(inp => {
+    const fid = inp.id.replace('sa-fill-f-', '');
+    answers[fid] = inp.type === 'checkbox' ? (inp.checked ? 'Yes' : 'No') : inp.value;
+  });
+  const r = await api(`/api/ss/checklists/${tid}/submit`, 'POST', {
+    submitted_by: session.user.id,
+    submitted_by_name: session.user.name,
+    answers
+  });
+  if (r && r.status === 'ok') {
+    document.getElementById('sa-fill-modal').style.display = 'none';
+    showToast('Checklist submitted!', 'green');
+  } else {
+    document.getElementById('sa-fill-status').textContent = 'Submit failed';
+    document.getElementById('sa-fill-status').style.color = 'var(--red)';
+  }
+}
+
+async function openSaChecklistHistory(tid, name) {
+  document.getElementById('sa-hist-title').textContent = `History — ${name}`;
+  const subs = await api(`/api/ss/checklists/${tid}/history`) || [];
+  const el = document.getElementById('sa-hist-list');
+  if (!subs.length) {
+    el.innerHTML = '<div class="empty-state">No submissions yet.</div>';
+  } else {
+    el.innerHTML = subs.map(s => {
+      const ans = s.answers || {};
+      const ansHtml = Object.entries(ans).map(([k,v]) =>
+        `<div style="margin-top:3px"><span style="color:var(--text3)">${escHtml(String(k))}:</span> ${escHtml(String(v))}</div>`
+      ).join('');
+      return `<div class="card" style="margin-bottom:8px;padding:10px">
+        <div style="font-size:12px;color:var(--text3)">${(s.submitted_at||'').slice(0,16)} · ${escHtml(s.submitted_by_name||'—')}</div>
+        ${ansHtml ? `<div style="margin-top:6px;font-size:12px">${ansHtml}</div>` : ''}
+      </div>`;
+    }).join('');
+  }
+  document.getElementById('sa-hist-modal').style.display = 'flex';
 }
 
 function toggleMgrAddUser() {
@@ -4138,7 +4353,7 @@ async function addUser() {
 async function loadUsers() {
   buildRoleDropdown();
   const el = document.getElementById('ad-users-list');
-  const roleColors = {manager:'amber',admin:'red',supervisor:'blue',artisan:'green',sawshop:'cyan',team_leader:'brown',stores_admin:'purple',picker:'blue',storeman:'blue'};
+  const roleColors = {manager:'amber',admin:'red',supervisor:'blue',artisan:'green',sawshop:'cyan',sawshop_admin:'cyan',team_leader:'brown',stores_admin:'purple',picker:'blue',storeman:'blue'};
   el.innerHTML = `<table class="data-table"><thead><tr><th>Name</th><th>Role</th><th>PIN</th><th>Actions</th></tr></thead>
     <tbody>${users.map(u=>`<tr>
       <td>${u.name}</td>
@@ -4318,16 +4533,30 @@ async function loadActivity() {
     requisition_queried:'red', user_deactivated:'red', equipment_deactivated:'red',
   };
   el.innerHTML = `<table class="data-table">
-    <thead><tr><th>Time</th><th>User</th><th>Action</th><th>Description</th></tr></thead>
+    <thead><tr><th>Time</th><th>User</th><th>Action</th><th>Description</th><th></th></tr></thead>
     <tbody>${log.map(l=>{
       const color = actColor[l.action_type] || 'blue';
+      const ref = extractJobRef(l.action_type, l.description);
+      const btn = ref ? `<button class="btn btn-ghost btn-xs" style="white-space:nowrap" onclick="openJobCardPopup('${ref.jtype}',${ref.jid})">📋 Card</button>` : '';
       return `<tr>
         <td style="white-space:nowrap">${l.logged_at?.replace('T',' ').substring(0,16)||''}</td>
         <td>${l.user_name||'-'}</td>
         <td><span class="badge badge-${color}">${(l.action_type||'-').replace(/_/g,' ')}</span></td>
         <td style="color:var(--text2)">${l.description||'-'}</td>
+        <td>${btn}</td>
       </tr>`;
     }).join('')}</tbody></table>`;
+}
+
+function extractJobRef(actionType, desc) {
+  if (!desc) return null;
+  const bdTypes = ['breakdown_logged','breakdown_completed','breakdown_completed_sup','breakdown_resolved','breakdown_reviewed'];
+  const pmTypes = ['task_completed','task_allocated','task_suspended','task_unsuspended'];
+  const m = desc.match(/#(\d+)/);
+  if (!m) return null;
+  if (bdTypes.includes(actionType)) return { jtype: 'breakdown', jid: parseInt(m[1]) };
+  if (pmTypes.includes(actionType)) return { jtype: 'PM', jid: parseInt(m[1]) };
+  return null;
 }
 
 // ========================================================
@@ -5953,6 +6182,59 @@ async function loadPickerLowStock() {
 
 <div id="app-toast" class="toast"></div>
 
+<!-- ── Floating Job Card Popup Layer (z-index 1050+, persists navigation) ── -->
+<div id="job-card-layer" style="position:fixed;inset:0;pointer-events:none;z-index:1050">
+  <!-- popups are appended here dynamically; pointer-events set to auto per-popup -->
+</div>
+
+<!-- ── Sawshop Admin: Template Fields Modal ── -->
+<div id="sa-fields-modal" class="modal-overlay" style="display:none">
+  <div class="modal" style="max-width:500px">
+    <div style="font-size:15px;font-weight:700;color:var(--text);margin-bottom:14px" id="sa-fields-title">Fields</div>
+    <input type="hidden" id="sa-fields-tid">
+    <div id="sa-fields-list" style="margin-bottom:14px"></div>
+    <div style="display:grid;grid-template-columns:2fr 1fr auto;gap:8px;align-items:end;margin-bottom:8px">
+      <input id="sa-field-label" placeholder="Field label *" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-size:13px;outline:none">
+      <select id="sa-field-type" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:7px 8px;color:var(--text);font-size:13px;outline:none">
+        <option value="text">Text</option>
+        <option value="number">Number</option>
+        <option value="checkbox">Checkbox</option>
+        <option value="date">Date</option>
+      </select>
+      <button class="btn btn-primary btn-sm" onclick="addSaField()">Add</button>
+    </div>
+    <span class="save-status" id="sa-field-status"></span>
+    <div style="margin-top:14px">
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('sa-fields-modal').style.display='none'">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Sawshop Admin: Fill Checklist Modal ── -->
+<div id="sa-fill-modal" class="modal-overlay" style="display:none">
+  <div class="modal" style="max-width:480px">
+    <div style="font-size:15px;font-weight:700;color:var(--text);margin-bottom:14px" id="sa-fill-title">Fill Checklist</div>
+    <input type="hidden" id="sa-fill-tid">
+    <div id="sa-fill-fields" style="max-height:380px;overflow-y:auto"></div>
+    <span class="save-status" id="sa-fill-status" style="display:block;margin-top:8px"></span>
+    <div style="display:flex;gap:8px;margin-top:14px">
+      <button class="btn btn-primary btn-sm" onclick="submitSaChecklist()">Submit</button>
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('sa-fill-modal').style.display='none'">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Sawshop Admin: Submission History Modal ── -->
+<div id="sa-hist-modal" class="modal-overlay" style="display:none">
+  <div class="modal" style="max-width:520px">
+    <div style="font-size:15px;font-weight:700;color:var(--text);margin-bottom:14px" id="sa-hist-title">Submission History</div>
+    <div id="sa-hist-list" style="max-height:420px;overflow-y:auto"></div>
+    <div style="margin-top:14px">
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('sa-hist-modal').style.display='none'">Close</button>
+    </div>
+  </div>
+</div>
+
 <!-- =================== STORE PICKER ==================== -->
 <div id="store-picker" class="screen">
   <div class="topbar">
@@ -6862,8 +7144,13 @@ async function loadChecklistHistory(tid) {
 async function loadMgrChecklists() {
   const scope = session.user.create_scope;
   if (!scope) return;
-  const tmpls = await api(`/api/checklists?role=${scope}`) || [];
   const el = document.getElementById('mgr-checklist-templates');
+  if (!el) return;
+  if (session.user.role === 'sawshop_admin') {
+    await loadSaChecklistAdmin(el);
+    return;
+  }
+  const tmpls = await api(`/api/checklists?role=${scope}`) || [];
   if (!tmpls.length) { el.innerHTML = '<div class="empty-state">No checklists available for this role.</div>'; return; }
   el.innerHTML = '';
   for (const t of tmpls) {
@@ -6988,7 +7275,8 @@ async function deleteSsPart(pid, mid) {
 
 async function loadSsJobs(tabBtn) {
   if (tabBtn) {
-    document.querySelectorAll('#mgr-ss-jobs .nav-tab').forEach(t => t.classList.remove('active'));
+    const container = document.getElementById('mgr-ss-jobs') || document.body;
+    container.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
     tabBtn.classList.add('active');
   }
   const el = document.getElementById('ss-jobs-list');
@@ -7428,6 +7716,177 @@ async function submitChecklistForm(tid) {
   } else {
     st.textContent = r?.message || 'Failed'; st.style.color='var(--red)';
   }
+}
+
+// ================================================================
+// JOB CARDS — Admin Schedule floating popup system
+// ================================================================
+let _jcRange = 'all';
+const _openJobCards = {};
+let _jcZIndex = 1050;
+
+function showScheduleSection(section, btn) {
+  document.querySelectorAll('#ad-tab-schedule > .nav-tabs .nav-tab').forEach(t => t.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  document.getElementById('sched-section-pm').style.display = section === 'pm' ? '' : 'none';
+  document.getElementById('sched-section-jc').style.display = section === 'jc' ? '' : 'none';
+  if (section === 'jc') {
+    loadJobCardAreas();
+    loadJobCards(_jcRange, document.getElementById('jc-range-' + _jcRange));
+  }
+}
+
+async function loadJobCardAreas() {
+  const areas = await api('/api/admin/areas') || [];
+  const sel = document.getElementById('jc-filter-area');
+  if (!sel) return;
+  const current = sel.value;
+  sel.innerHTML = '<option value="">All Areas</option>' + areas.map(a => `<option value="${escHtml(a)}">${escHtml(a)}</option>`).join('');
+  sel.value = current;
+}
+
+async function loadJobCards(range, btn) {
+  _jcRange = range || _jcRange;
+  if (btn) {
+    document.querySelectorAll('#sched-section-jc > .nav-tabs .nav-tab').forEach(t => t.classList.remove('active'));
+    btn.classList.add('active');
+  }
+  const areaFilter = (document.getElementById('jc-filter-area') || {}).value || '';
+  const typeFilter = (document.getElementById('jc-filter-type') || {}).value || '';
+  const params = new URLSearchParams({ range: _jcRange });
+  if (areaFilter) params.set('area', areaFilter);
+  if (typeFilter) params.set('type', typeFilter);
+  const jobs = await api('/api/admin/job-cards?' + params.toString()) || [];
+  const el = document.getElementById('jc-list');
+  if (!jobs.length) { el.innerHTML = '<div class="empty-state">No job cards found for this selection.</div>'; return; }
+  const statusColors = { completed:'var(--green)', resolved:'var(--green)', closed:'var(--green)',
+                         in_progress:'var(--amber)', pending:'var(--text3)',
+                         open:'var(--red)', active:'var(--red)' };
+  el.innerHTML = jobs.map(j => {
+    const sc = statusColors[j.status] || 'var(--text3)';
+    const icon = j.job_type === 'PM' ? '📅' : '⚠️';
+    return `<div class="card" style="margin-bottom:8px;padding:12px;cursor:pointer;border-left:3px solid ${sc}" onclick="openJobCardPopup('${j.job_type}',${j.id})">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:700;font-size:13px;color:var(--text)">${icon} ${escHtml(j.job_title||j.equipment_name||'Job')}</div>
+          <div style="font-size:12px;color:var(--text3);margin-top:3px">${escHtml(j.artisan_name||'Unassigned')} · ${escHtml(j.area||j.area_code||'—')} · ${(j.created_date||'').slice(0,10)}</div>
+        </div>
+        <span style="font-size:10px;background:${sc}20;color:${sc};border:1px solid ${sc}40;padding:3px 8px;border-radius:10px;white-space:nowrap">${(j.status||'').replace(/_/g,' ')}</span>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function refreshJobCards() {
+  loadJobCards(_jcRange, null);
+}
+
+async function openJobCardPopup(jtype, jid) {
+  const key = `${jtype}_${jid}`;
+  if (_openJobCards[key]) {
+    _openJobCards[key].style.display = 'block';
+    _openJobCards[key].style.zIndex = ++_jcZIndex;
+    return;
+  }
+  const data = await api(`/api/admin/job-cards/${jtype}/${jid}`);
+  if (!data) { showToast('Could not load job card.', 'red'); return; }
+  const popup = buildJobCardPopup(key, jtype, jid, data);
+  document.getElementById('job-card-layer').appendChild(popup);
+  _openJobCards[key] = popup;
+  makeDraggable(popup);
+}
+
+function buildJobCardPopup(key, jtype, jid, data) {
+  const popup = document.createElement('div');
+  popup.className = 'jc-popup';
+  const offset = Object.keys(_openJobCards).length;
+  popup.style.cssText = `right:${20 + offset * 25}px;top:${70 + offset * 30}px;z-index:${++_jcZIndex}`;
+
+  const icon = jtype === 'PM' ? '📅' : '⚠️';
+  const sc = { completed:'var(--green)', resolved:'var(--green)', closed:'var(--green)',
+                in_progress:'var(--amber)', pending:'var(--text3)',
+                open:'var(--red)', active:'var(--red)' }[data[jtype === 'PM' ? 'task' : 'breakdown']?.status] || 'var(--text3)';
+
+  const rec = jtype === 'PM' ? data.task : data.breakdown;
+  if (!rec) return popup;
+
+  const rows = [];
+  const add = (lbl, val) => val ? rows.push(`<div class="jc-popup-row"><span class="jc-lbl">${lbl}</span><span>${val}</span></div>`) : null;
+  add('Type', jtype === 'PM' ? 'Preventive Maintenance' : 'Breakdown');
+  rows.push(`<div class="jc-popup-row"><span class="jc-lbl">Status</span><span style="font-size:10px;background:${sc}20;color:${sc};padding:3px 8px;border-radius:10px">${(rec.status||'—').replace(/_/g,' ')}</span></div>`);
+  add('Area', escHtml(rec.dept || rec.area_code || ''));
+  add('Machine', escHtml(rec.equipment_name || ''));
+  add('Assigned', escHtml(rec.artisan_name || rec.artisan_full_name || ''));
+  add('Description', `<span style="color:var(--text2)">${escHtml(rec.description || rec.title || '')}</span>`);
+  if (jtype === 'PM') {
+    add('Due', (rec.scheduled_date||'').slice(0,10));
+    add('Completed', (rec.completed_date||'').slice(0,10));
+    if (rec.suspended) add('Suspended', escHtml(rec.suspend_reason || 'Yes'));
+    if (data.checklist && data.checklist.length) {
+      rows.push(`<div class="jc-section">Checklist (${data.checklist.filter(c=>c.checked).length}/${data.checklist.length} done)</div>`);
+      data.checklist.slice(0,8).forEach(c => {
+        rows.push(`<div class="jc-popup-row" style="gap:6px"><span>${c.checked ? '✅' : '⬜'}</span><span style="color:var(--text2)">${escHtml(c.item)}</span></div>`);
+      });
+    }
+    if (data.parts && data.parts.length) {
+      rows.push(`<div class="jc-section">Parts Used</div>`);
+      data.parts.slice(0,5).forEach(p => rows.push(`<div class="jc-popup-row"><span class="jc-lbl">${escHtml(p.part_name)}</span><span>${p.quantity} ${p.unit||''}</span></div>`));
+    }
+  } else {
+    add('Failure type', escHtml(rec.failure_type || ''));
+    if (rec.downtime_mins) add('Downtime', `${Math.floor(rec.downtime_mins/60)}h ${rec.downtime_mins%60}m`);
+    add('Logged', (rec.reported_at||'').slice(0,16).replace('T',' '));
+    add('Resolved', (rec.resolved_at||'').slice(0,16).replace('T',' '));
+    add('Resolution', `<span style="color:var(--text2)">${escHtml(rec.resolution||'')}</span>`);
+    if (data.allocations && data.allocations.length) {
+      rows.push(`<div class="jc-section">Labour</div>`);
+      data.allocations.slice(0,4).forEach(a => rows.push(`<div class="jc-popup-row"><span class="jc-lbl">${escHtml(a.dept||'—')}</span><span style="color:var(--text3)">${a.mins?Math.floor(a.mins/60)+'h '+a.mins%60+'m':'—'}</span></div>`));
+    }
+  }
+
+  popup.innerHTML = `
+    <div class="jc-popup-header">
+      <div style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700;font-size:13px;color:var(--text)">${icon} ${escHtml(rec.title||rec.description||rec.equipment_name||'Job Card')}</div>
+      <div style="display:flex;gap:4px;flex-shrink:0">
+        <button class="btn btn-ghost btn-xs" onclick="this.closest('.jc-popup').style.display='none'" title="Minimise">−</button>
+        <button class="btn btn-ghost btn-xs" style="color:var(--red)" onclick="closeJobCardPopup('${key}')" title="Close">✕</button>
+      </div>
+    </div>
+    <div class="jc-popup-body">${rows.join('')}</div>`;
+  return popup;
+}
+
+function closeJobCardPopup(key) {
+  if (_openJobCards[key]) {
+    _openJobCards[key].remove();
+    delete _openJobCards[key];
+  }
+}
+
+let _drag = null;
+
+function makeDraggable(popup) {
+  const header = popup.querySelector('.jc-popup-header');
+  if (!header) return;
+  header.addEventListener('mousedown', e => {
+    e.preventDefault();
+    _drag = { el: popup, ox: e.clientX - popup.offsetLeft, oy: e.clientY - popup.offsetTop };
+    popup.style.zIndex = ++_jcZIndex;
+    popup.style.right = 'auto';
+    document.addEventListener('mousemove', onDragMove);
+    document.addEventListener('mouseup', onDragStop, { once: true });
+  });
+}
+
+function onDragMove(e) {
+  if (!_drag) return;
+  _drag.el.style.left = Math.max(0, e.clientX - _drag.ox) + 'px';
+  _drag.el.style.top = Math.max(0, e.clientY - _drag.oy) + 'px';
+}
+
+function onDragStop() {
+  _drag = null;
+  document.removeEventListener('mousemove', onDragMove);
 }
 </script>
 

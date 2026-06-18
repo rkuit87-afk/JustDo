@@ -1093,6 +1093,9 @@ def _run_migrations():
         # v10.2 — artisan failure type for full cross-party comparison
         ("breakdowns",      "art_failure_type",              "ALTER TABLE breakdowns ADD COLUMN art_failure_type TEXT"),
         ("breakdowns",      "sup_time_end",                  "ALTER TABLE breakdowns ADD COLUMN sup_time_end TEXT"),
+        # v10.3 — sawshop_admin role + scoped checklists
+        ("form_templates",  "scope",                         "ALTER TABLE form_templates ADD COLUMN scope TEXT DEFAULT 'mill'"),
+        ("requisitions",    "source_domain",                 "ALTER TABLE requisitions ADD COLUMN source_domain TEXT DEFAULT 'mill'"),
     ]
 
     with get_db_context() as conn:
@@ -1128,6 +1131,31 @@ def _run_migrations():
             logger.debug("Team leader roles restored for ids 7, 8, 13")
         except Exception as e:
             logger.debug(f"Team leader role migration: {e}")
+
+        # Migrate Stefan Botha (Sawshop manager) → sawshop_admin role + create_scope
+        try:
+            conn.execute(
+                "UPDATE users SET role='sawshop_admin', create_scope='sawshop' WHERE name LIKE '%Botha, Stefan%' AND role='manager'"
+            )
+            # Also fix if already migrated but create_scope still null
+            conn.execute(
+                "UPDATE users SET create_scope='sawshop' WHERE role='sawshop_admin' AND (create_scope IS NULL OR create_scope='')"
+            )
+            conn.commit()
+            logger.debug("Stefan Botha migrated to sawshop_admin")
+        except Exception as e:
+            logger.debug(f"sawshop_admin migration: {e}")
+
+        # Fix Boiler Daily Log — scope='mill', not sawshop
+        try:
+            conn.execute(
+                "UPDATE form_templates SET scope='mill', target_roles=? WHERE name='Boiler Daily Log'",
+                ('["admin","supervisor"]',)
+            )
+            conn.commit()
+            logger.debug("Boiler Daily Log scope fixed to mill")
+        except Exception as e:
+            logger.debug(f"Boiler scope fix: {e}")
 
         # Seed Boiler Daily Log checklist template
         try:
@@ -1331,7 +1359,7 @@ def _seed_users_equipment():
         ('Van Den Heever, Andries', 'manager',    None, None, 1, 0, 'none'),   # allocates jobs, doesn't pick who
         ('Roth, Glen',              'manager',    None, None, 1, 0, 'all'),
         # ---- Team-leader managers (department-scoped creation) ----
-        ('Botha, Stefan',           'manager',    None, 'Sawshop', 1, 1, 'sawshop'),   # own stock + requisitions, sawshop only
+        ('Botha, Stefan',           'sawshop_admin', None, 'Sawshop', 1, 1, 'sawshop'),   # Sawshop Admin — full sawshop domain, isolated from mill
         ('Strydom, Francois',       'manager',    None, 'Wetmill', 1, 0, 'wetmill_nonelec'),
         ('Kock, Divan',             'manager',    None, 'Wetmill', 1, 0, 'wetmill_fitter'),
         ('Jacobs, JJ',              'manager',    None, 'Drymill', 1, 0, 'drymill'),

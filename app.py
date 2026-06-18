@@ -177,7 +177,7 @@ def add_user():
     name = str(d.get('name', '')).strip()
     role = d.get('role')
     
-    valid_roles = {'manager', 'admin', 'supervisor', 'artisan', 'sawshop', 'team_leader', 'picker', 'storeman', 'stores_admin'}
+    valid_roles = {'manager', 'admin', 'supervisor', 'artisan', 'sawshop', 'team_leader', 'picker', 'storeman', 'stores_admin', 'sawshop_admin'}
     if not name or role not in valid_roles:
         return jsonify({'status': 'error', 'message': f'Valid name and role required. Valid roles: {valid_roles}'}), 400
 
@@ -3760,6 +3760,345 @@ def ss_export():
     except Exception as e:
         logger.error(f"ss_export: {e}", exc_info=True)
         return jsonify({'status':'error','message':str(e)}), 500
+
+# ============================================================
+# SAWSHOP — artisan list (sawshop-scoped only)
+# ============================================================
+
+@app.route('/api/ss/artisans')
+def ss_get_artisans():
+    """Return only sawshop-role artisans for breakdown assignment."""
+    try:
+        with get_db_context() as conn:
+            rows = conn.execute(
+                "SELECT id, name FROM users WHERE role='sawshop' AND active=1 ORDER BY name"
+            ).fetchall()
+        return jsonify([dict(r) for r in rows])
+    except Exception as e:
+        logger.error(f"ss_get_artisans: {e}", exc_info=True)
+        return jsonify([])
+
+
+# ============================================================
+# SAWSHOP — scoped checklists (sawshop_admin manages, sawshop fills)
+# ============================================================
+
+@app.route('/api/ss/checklists')
+def ss_get_checklists():
+    """Return sawshop-scoped checklist templates."""
+    try:
+        with get_db_context() as conn:
+            rows = conn.execute(
+                "SELECT id,name,description FROM form_templates WHERE scope='sawshop' AND active=1 ORDER BY name"
+            ).fetchall()
+        return jsonify([dict(r) for r in rows])
+    except Exception as e:
+        logger.error(f"ss_get_checklists: {e}", exc_info=True)
+        return jsonify([])
+
+
+@app.route('/api/ss/checklists', methods=['POST'])
+def ss_create_checklist():
+    """Sawshop admin creates a new sawshop-scoped checklist template."""
+    d = safe_json(request)
+    name = (d.get('name') or '').strip()
+    desc = (d.get('description') or '').strip()
+    if not name:
+        return jsonify({'status': 'error', 'message': 'Name required'}), 400
+    try:
+        with get_db_context() as conn:
+            cur = conn.execute(
+                "INSERT INTO form_templates (name, description, scope, target_roles) VALUES (?,?,?,?)",
+                (name, desc, 'sawshop', '["sawshop","sawshop_admin"]')
+            )
+            conn.commit()
+        return jsonify({'status': 'ok', 'id': cur.lastrowid})
+    except Exception as e:
+        logger.error(f"ss_create_checklist: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'message': 'Failed'}), 500
+
+
+@app.route('/api/ss/checklists/<int:tid>', methods=['DELETE'])
+def ss_delete_checklist(tid):
+    """Sawshop admin deactivates a checklist template."""
+    try:
+        with get_db_context() as conn:
+            conn.execute("UPDATE form_templates SET active=0 WHERE id=? AND scope='sawshop'", (tid,))
+            conn.commit()
+        return jsonify({'status': 'ok'})
+    except Exception as e:
+        logger.error(f"ss_delete_checklist: {e}", exc_info=True)
+        return jsonify({'status': 'error'}), 500
+
+
+@app.route('/api/ss/checklists/<int:tid>/fields', methods=['GET'])
+def ss_get_checklist_fields(tid):
+    """Get fields for a sawshop checklist template."""
+    try:
+        with get_db_context() as conn:
+            t = conn.execute(
+                "SELECT id,name,description FROM form_templates WHERE id=? AND scope='sawshop'", (tid,)
+            ).fetchone()
+            if not t:
+                return jsonify({'status': 'error', 'message': 'Not found'}), 404
+            fields = conn.execute(
+                "SELECT id,field_key,label,field_type,unit,required,sort_order FROM form_fields WHERE template_id=? ORDER BY sort_order",
+                (tid,)
+            ).fetchall()
+        return jsonify({'template': dict(t), 'fields': [dict(f) for f in fields]})
+    except Exception as e:
+        logger.error(f"ss_get_checklist_fields: {e}", exc_info=True)
+        return jsonify({'status': 'error'}), 500
+
+
+@app.route('/api/ss/checklists/<int:tid>/fields', methods=['POST'])
+def ss_add_checklist_field(tid):
+    """Add a field to a sawshop checklist template."""
+    d = safe_json(request)
+    label = (d.get('label') or '').strip()
+    if not label:
+        return jsonify({'status': 'error', 'message': 'Label required'}), 400
+    try:
+        with get_db_context() as conn:
+            # Verify template is sawshop-scoped
+            t = conn.execute("SELECT id FROM form_templates WHERE id=? AND scope='sawshop'", (tid,)).fetchone()
+            if not t:
+                return jsonify({'status': 'error', 'message': 'Not found'}), 404
+            max_order = conn.execute(
+                "SELECT COALESCE(MAX(sort_order),0) FROM form_fields WHERE template_id=?", (tid,)
+            ).fetchone()[0]
+            conn.execute(
+                "INSERT INTO form_fields (template_id,field_key,label,field_type,unit,required,sort_order) VALUES (?,?,?,?,?,?,?)",
+                (tid, label.lower().replace(' ', '_'), label, d.get('field_type', 'text'),
+                 d.get('unit', ''), int(d.get('required', 0)), max_order + 1)
+            )
+            conn.commit()
+        return jsonify({'status': 'ok'})
+    except Exception as e:
+        logger.error(f"ss_add_checklist_field: {e}", exc_info=True)
+        return jsonify({'status': 'error'}), 500
+
+
+@app.route('/api/ss/checklists/<int:tid>/submit', methods=['POST'])
+def ss_submit_checklist(tid):
+    """Submit a filled sawshop checklist."""
+    d = safe_json(request)
+    try:
+        with get_db_context() as conn:
+            t = conn.execute("SELECT id FROM form_templates WHERE id=? AND scope='sawshop' AND active=1", (tid,)).fetchone()
+            if not t:
+                return jsonify({'status': 'error', 'message': 'Template not found'}), 404
+            cur = conn.execute(
+                "INSERT INTO form_submissions (template_id, submitted_by_name, submission_date, notes) VALUES (?,?,date('now'),?)",
+                (tid, d.get('submitted_by', 'Unknown'), d.get('notes', ''))
+            )
+            sid = cur.lastrowid
+            for key, val in (d.get('values') or {}).items():
+                conn.execute(
+                    "INSERT INTO form_values (submission_id, field_key, value) VALUES (?,?,?)",
+                    (sid, key, str(val))
+                )
+            conn.commit()
+        log_action('Sawshop', 'checklist_submitted', f"Checklist {tid} submitted")
+        return jsonify({'status': 'ok', 'submission_id': sid})
+    except Exception as e:
+        logger.error(f"ss_submit_checklist: {e}", exc_info=True)
+        return jsonify({'status': 'error'}), 500
+
+
+@app.route('/api/ss/checklists/<int:tid>/history')
+def ss_checklist_history(tid):
+    """Recent submissions for a sawshop checklist."""
+    try:
+        with get_db_context() as conn:
+            rows = conn.execute(
+                """SELECT s.id, s.submitted_by_name, s.submission_date, s.submitted_at, s.notes
+                   FROM form_submissions s
+                   JOIN form_templates t ON t.id=s.template_id
+                   WHERE s.template_id=? AND t.scope='sawshop'
+                   ORDER BY s.submitted_at DESC LIMIT 30""",
+                (tid,)
+            ).fetchall()
+        return jsonify([dict(r) for r in rows])
+    except Exception as e:
+        logger.error(f"ss_checklist_history: {e}", exc_info=True)
+        return jsonify([])
+
+
+# ============================================================
+# ADMIN JOB CARDS — combined PM + Breakdown view with filters
+# ============================================================
+
+@app.route('/api/admin/job-cards')
+def admin_job_cards():
+    """
+    Return combined PM tasks + breakdowns for the Admin Job Cards view.
+
+    Query params:
+      range   : all | today | week | month  (default: all)
+      area    : equipment area code filter
+      type    : PM | breakdown               (default: both)
+      status  : open | completed | all       (default: all)
+    """
+    rng    = request.args.get('range', 'all')
+    area   = request.args.get('area', '')
+    jtype  = request.args.get('type', 'all')
+    status = request.args.get('status', 'all')
+
+    date_filter = ""
+    if rng == 'today':
+        date_filter = "AND date(created_date) = date('now')"
+    elif rng == 'week':
+        date_filter = "AND date(created_date) >= date('now','weekday 1','-7 days')"
+    elif rng == 'month':
+        date_filter = "AND date(created_date) >= date('now','start of month')"
+
+    cards = []
+
+    try:
+        with get_db_context() as conn:
+            # PM Tasks
+            if jtype in ('all', 'PM'):
+                pm_where = "WHERE 1=1"
+                if area:
+                    pm_where += f" AND (e.area_code='{area}' OR e.dept='{area}')"
+                if status == 'open':
+                    pm_where += " AND t.status NOT IN ('completed','cancelled')"
+                elif status == 'completed':
+                    pm_where += " AND t.status='completed'"
+
+                pm_sql = f"""
+                    SELECT t.id, 'PM' as job_type, t.title as job_title, t.status,
+                           t.due_date as created_date, t.completed_at as completed_date,
+                           t.job_number, u.name as artisan_name,
+                           e.name as equipment_name, e.dept as area, e.area_code,
+                           t.description, NULL as resolution,
+                           t.suspended, t.suspend_reason,
+                           NULL as downtime_mins, NULL as failure_type
+                    FROM pm_tasks t
+                    LEFT JOIN equipment e ON e.id=t.equipment_id
+                    LEFT JOIN users u ON u.id=t.assigned_to
+                    {pm_where} {date_filter.replace('created_date','t.due_date')}
+                    ORDER BY t.due_date DESC
+                    LIMIT 500
+                """
+                rows = conn.execute(pm_sql).fetchall()
+                cards.extend([dict(r) for r in rows])
+
+            # Breakdowns
+            if jtype in ('all', 'breakdown'):
+                bd_where = "WHERE 1=1"
+                if area:
+                    bd_where += f" AND (e.area_code='{area}' OR e.dept='{area}')"
+                if status == 'open':
+                    bd_where += " AND b.status NOT IN ('resolved','closed')"
+                elif status == 'completed':
+                    bd_where += " AND b.status IN ('resolved','closed')"
+
+                bd_sql = f"""
+                    SELECT b.id, 'breakdown' as job_type,
+                           COALESCE(b.final_description, b.art_description, b.sup_notes, '') as job_title,
+                           b.status, b.logged_at as created_date, b.art_completed_at as completed_date,
+                           NULL as job_number, u.name as artisan_name,
+                           e.name as equipment_name, e.dept as area, e.area_code,
+                           COALESCE(b.final_description, b.art_description, b.sup_notes, '') as description,
+                           COALESCE(b.art_repair_action, b.sup_repair_action, '') as resolution,
+                           NULL as suspended, NULL as suspend_reason,
+                           b.downtime_mins,
+                           COALESCE(b.final_failure_type, b.art_failure_type, b.sup_failure_type, '') as failure_type
+                    FROM breakdowns b
+                    LEFT JOIN equipment e ON e.id=b.equipment_id
+                    LEFT JOIN users u ON u.id=b.artisan_id
+                    {bd_where} {date_filter.replace('created_date','b.logged_at')}
+                    ORDER BY b.logged_at DESC
+                    LIMIT 500
+                """
+                rows = conn.execute(bd_sql).fetchall()
+                cards.extend([dict(r) for r in rows])
+
+        # Sort combined list by created_date desc
+        cards.sort(key=lambda x: x.get('created_date') or '', reverse=True)
+        return jsonify(cards[:500])
+    except Exception as e:
+        logger.error(f"admin_job_cards: {e}", exc_info=True)
+        return jsonify([])
+
+
+@app.route('/api/admin/job-cards/<jtype>/<int:jid>')
+def admin_job_card_detail(jtype, jid):
+    """Full detail for a single job card (PM task or breakdown)."""
+    try:
+        with get_db_context() as conn:
+            if jtype == 'PM':
+                row = conn.execute("""
+                    SELECT t.*,
+                           e.name as equipment_name, e.area_code, e.dept,
+                           u.name as artisan_full_name
+                    FROM pm_tasks t
+                    LEFT JOIN equipment e ON e.id=t.equipment_id
+                    LEFT JOIN users u ON u.id=t.assigned_to
+                    WHERE t.id=?""", (jid,)).fetchone()
+                if not row:
+                    return jsonify({'status': 'error', 'message': 'Not found'}), 404
+                parts = conn.execute(
+                    "SELECT part_desc as part_name, qty as quantity FROM pm_parts WHERE task_id=?", (jid,)
+                ).fetchall()
+                checklist = conn.execute(
+                    "SELECT item, checked, flagged, flag_comment FROM pm_checklist_items WHERE task_id=? ORDER BY sort_order, id",
+                    (jid,)
+                ).fetchall()
+                return jsonify({
+                    'job_type': 'PM',
+                    'task': dict(row),
+                    'parts': [dict(p) for p in parts],
+                    'checklist': [dict(c) for c in checklist],
+                })
+            else:  # breakdown
+                row = conn.execute("""
+                    SELECT b.*,
+                           COALESCE(b.final_description, b.art_description, b.sup_notes, '') as description,
+                           COALESCE(b.art_repair_action, b.sup_repair_action, '') as resolution,
+                           COALESCE(b.final_failure_type, b.art_failure_type, b.sup_failure_type, '') as failure_type,
+                           e.name as equipment_name, e.area_code, e.dept,
+                           u.name as artisan_name
+                    FROM breakdowns b
+                    LEFT JOIN equipment e ON e.id=b.equipment_id
+                    LEFT JOIN users u ON u.id=b.artisan_id
+                    WHERE b.id=?""", (jid,)).fetchone()
+                if not row:
+                    return jsonify({'status': 'error', 'message': 'Not found'}), 404
+                parts = conn.execute(
+                    "SELECT part_desc as part_name, qty as quantity FROM breakdown_parts WHERE breakdown_id=?", (jid,)
+                ).fetchall()
+                allocs = conn.execute(
+                    """SELECT a.dept, a.mins, a.note, a.created_at
+                       FROM breakdown_allocations a
+                       WHERE a.breakdown_id=? ORDER BY a.created_at""", (jid,)
+                ).fetchall()
+                return jsonify({
+                    'job_type': 'breakdown',
+                    'breakdown': dict(row),
+                    'parts': [dict(p) for p in parts],
+                    'allocations': [dict(a) for a in allocs],
+                })
+    except Exception as e:
+        logger.error(f"admin_job_card_detail: {e}", exc_info=True)
+        return jsonify({'status': 'error'}), 500
+
+
+@app.route('/api/admin/areas')
+def admin_area_list():
+    """Distinct area codes + dept names for filter dropdowns."""
+    try:
+        with get_db_context() as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT dept FROM equipment WHERE dept IS NOT NULL AND dept != '' ORDER BY dept"
+            ).fetchall()
+        return jsonify([r[0] for r in rows])
+    except Exception as e:
+        logger.error(f"admin_area_list: {e}", exc_info=True)
+        return jsonify([])
+
 
 # ---- Background Scheduler ----
 def background_scheduler():
