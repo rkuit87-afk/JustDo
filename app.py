@@ -631,6 +631,23 @@ def suspend_task(task_id):
         return jsonify({'status': 'error', 'message': 'Failed to suspend task'}), 500
 
 
+@app.route('/api/tasks/<int:task_id>/reassign', methods=['POST'])
+def reassign_task(task_id):
+    """Team leader reassigns an allocated job to a specific artisan."""
+    d = safe_json(request)
+    new_user_id = d.get('assigned_to')
+    if not new_user_id:
+        return jsonify({'status': 'error', 'message': 'assigned_to is required'}), 400
+    try:
+        with get_db_context() as conn:
+            conn.execute("UPDATE pm_tasks SET assigned_to=? WHERE id=?", (int(new_user_id), task_id))
+            conn.commit()
+        return jsonify({'status': 'ok'})
+    except Exception as e:
+        logger.error(f"reassign_task {task_id}: {e}", exc_info=True)
+        return jsonify({'status': 'error'}), 500
+
+
 @app.route('/api/tasks/<int:task_id>/unsuspend', methods=['POST'])
 def unsuspend_task(task_id):
     """Admin pushes a suspended job back to the artisan with a note."""
@@ -3488,7 +3505,7 @@ def ss_get_parts(mid):
     try:
         with get_db_context() as conn:
             rows = conn.execute(
-                "SELECT id,part_name,part_number FROM ss_parts WHERE machine_id=? AND active=1 ORDER BY part_name",
+                "SELECT id,part_name,part_number,part_type FROM ss_parts WHERE machine_id=? AND active=1 ORDER BY part_name",
                 (mid,)).fetchall()
         return jsonify([dict(r) for r in rows])
     except Exception as e:
@@ -3499,13 +3516,16 @@ def ss_add_part(mid):
     d = safe_json(request)
     part_name = (d.get('part_name') or '').strip()
     part_number = (d.get('part_number') or '').strip() or None
+    part_type = d.get('part_type', 'Mechanical')
+    if part_type not in ('Mechanical', 'Consumable', 'Electrical'):
+        part_type = 'Mechanical'
     if not part_name:
         return jsonify({'status':'error','message':'Part name required'}), 400
     try:
         with get_db_context() as conn:
             cur = conn.execute(
-                "INSERT INTO ss_parts (machine_id,part_name,part_number) VALUES (?,?,?)",
-                (mid, part_name, part_number))
+                "INSERT INTO ss_parts (machine_id,part_name,part_number,part_type) VALUES (?,?,?,?)",
+                (mid, part_name, part_number, part_type))
             conn.commit()
         return jsonify({'status':'ok','id':cur.lastrowid})
     except Exception as e:
@@ -3517,12 +3537,15 @@ def ss_update_part(pid):
     d = safe_json(request)
     part_name = (d.get('part_name') or '').strip()
     part_number = (d.get('part_number') or '').strip() or None
+    part_type = d.get('part_type', 'Mechanical')
+    if part_type not in ('Mechanical', 'Consumable', 'Electrical'):
+        part_type = 'Mechanical'
     if not part_name:
         return jsonify({'status':'error','message':'Part name required'}), 400
     try:
         with get_db_context() as conn:
-            conn.execute("UPDATE ss_parts SET part_name=?,part_number=? WHERE id=?",
-                         (part_name, part_number, pid))
+            conn.execute("UPDATE ss_parts SET part_name=?,part_number=?,part_type=? WHERE id=?",
+                         (part_name, part_number, part_type, pid))
             conn.commit()
         return jsonify({'status':'ok'})
     except Exception as e:
@@ -4110,6 +4133,200 @@ def admin_area_list():
     except Exception as e:
         logger.error(f"admin_area_list: {e}", exc_info=True)
         return jsonify([])
+
+
+# ============================================================
+# NEWINGTON MILL JOB CARDS
+# ============================================================
+
+def _next_wo_number(conn):
+    row = conn.execute(
+        "SELECT COALESCE(MAX(CAST(SUBSTR(work_order_number,3) AS INTEGER)),0)+1 AS n "
+        "FROM job_cards WHERE work_order_number LIKE 'NW%'"
+    ).fetchone()
+    return f"NW{row['n']:04d}"
+
+
+def _upsert_jc_ra(conn, jid, ra):
+    bool_fields = [
+        'hazard_slip_trip','hazard_splashes_flying_debris','hazard_hot_surfaces',
+        'hazard_manual_handling','hazard_chemicals_dust_gases','hazard_collapse_overturn',
+        'hazard_pressure_stored_energy','hazard_work_at_height','hazard_heavy_lifting',
+        'hazard_sharp_edges_low_clearance','hazard_sudden_release_hand_tools',
+        'hazard_electricity_buried_services','hazard_vehicle_pit_movement',
+        'hazard_machinery_movement','hazard_high_noise','hazard_fire_explosion',
+        'hazard_confined_space_excavation',
+        'competent_to_do_job','medically_fit','safe_easy_access','requires_loto',
+        'permit_required','gates_guards_secure','coworkers_safe_before_testing',
+        'correct_tools_ppe_used',
+    ]
+    existing = conn.execute(
+        "SELECT id FROM job_card_risk_assessments WHERE job_card_id=?", (jid,)
+    ).fetchone()
+    bool_vals = [1 if ra.get(f) else 0 for f in bool_fields]
+    extra_vals = [ra.get('hazard_other'), ra.get('loto_mode')]
+    if existing:
+        set_parts = ', '.join(f'{f}=?' for f in bool_fields) + ', hazard_other=?, loto_mode=?'
+        conn.execute(
+            f"UPDATE job_card_risk_assessments SET {set_parts} WHERE job_card_id=?",
+            bool_vals + extra_vals + [jid]
+        )
+    else:
+        cols = ', '.join(bool_fields) + ', hazard_other, loto_mode, job_card_id'
+        ph = ', '.join(['?'] * (len(bool_fields) + 3))
+        conn.execute(
+            f"INSERT INTO job_card_risk_assessments ({cols}) VALUES ({ph})",
+            bool_vals + extra_vals + [jid]
+        )
+
+
+@app.route('/api/job_cards', methods=['GET'])
+def list_job_cards():
+    try:
+        with get_db_context() as conn:
+            rows = conn.execute("""
+                SELECT id, work_order_number, request_date, department,
+                       asset_equipment_description, work_order_type,
+                       responsible_employee, requested_by, status, created_at,
+                       job_description
+                FROM job_cards
+                ORDER BY created_at DESC
+            """).fetchall()
+        return jsonify([dict(r) for r in rows])
+    except Exception as e:
+        logger.error(f"list_job_cards: {e}", exc_info=True)
+        return jsonify([])
+
+
+@app.route('/api/job_cards/<int:jid>', methods=['GET'])
+def get_job_card(jid):
+    try:
+        with get_db_context() as conn:
+            jc = conn.execute("SELECT * FROM job_cards WHERE id=?", (jid,)).fetchone()
+            if not jc:
+                return jsonify({'status': 'error', 'message': 'Not found'}), 404
+            resources = conn.execute(
+                "SELECT * FROM job_card_resources WHERE job_card_id=? ORDER BY id", (jid,)
+            ).fetchall()
+            ra = conn.execute(
+                "SELECT * FROM job_card_risk_assessments WHERE job_card_id=?", (jid,)
+            ).fetchone()
+        return jsonify({
+            **dict(jc),
+            'resources': [dict(r) for r in resources],
+            'risk_assessment': dict(ra) if ra else None,
+        })
+    except Exception as e:
+        logger.error(f"get_job_card {jid}: {e}", exc_info=True)
+        return jsonify({'status': 'error'}), 500
+
+
+@app.route('/api/job_cards', methods=['POST'])
+def create_job_card():
+    d = safe_json(request)
+    try:
+        with get_db_context() as conn:
+            wo = _next_wo_number(conn)
+            cur = conn.execute("""
+                INSERT INTO job_cards (
+                    work_order_number, request_date, request_time,
+                    department, asset_equipment_number, asset_equipment_description,
+                    work_order_type, requested_by, requested_by_id,
+                    responsible_employee, responsible_employee_id,
+                    shift, job_description,
+                    fault_symptom, fault_area, fault_type, fault_cause, fault_remedy,
+                    tradesman_report,
+                    actual_start_date, actual_start_time, actual_end_date, actual_end_time,
+                    spares_used, cleaned_up, follow_up_work, follow_up_wo_needed,
+                    supervisor_comment, supervisor_name, supervisor_date, acceptance,
+                    status, breakdown_id, task_id
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """, (
+                wo,
+                d.get('request_date') or datetime.now().strftime('%Y-%m-%d'),
+                d.get('request_time') or datetime.now().strftime('%H:%M'),
+                d.get('department'), d.get('asset_equipment_number'),
+                d.get('asset_equipment_description'),
+                d.get('work_order_type', 'Breakdown'),
+                d.get('requested_by'), d.get('requested_by_id'),
+                d.get('responsible_employee'), d.get('responsible_employee_id'),
+                d.get('shift', 'Day'),
+                d.get('job_description'),
+                d.get('fault_symptom'), d.get('fault_area'),
+                d.get('fault_type'), d.get('fault_cause'), d.get('fault_remedy'),
+                d.get('tradesman_report'),
+                d.get('actual_start_date'), d.get('actual_start_time'),
+                d.get('actual_end_date'), d.get('actual_end_time'),
+                d.get('spares_used'),
+                1 if d.get('cleaned_up') else 0,
+                d.get('follow_up_work'),
+                1 if d.get('follow_up_wo_needed') else 0,
+                d.get('supervisor_comment'), d.get('supervisor_name'),
+                d.get('supervisor_date'),
+                1 if d.get('acceptance') else 0,
+                d.get('status', 'open'),
+                d.get('breakdown_id'), d.get('task_id'),
+            ))
+            jid = cur.lastrowid
+            for res in (d.get('resources') or []):
+                conn.execute(
+                    "INSERT INTO job_card_resources (job_card_id,entry_date,name,company_no,time_entry)"
+                    " VALUES (?,?,?,?,?)",
+                    (jid, res.get('entry_date'), res.get('name'),
+                     res.get('company_no'), res.get('time_entry'))
+                )
+            ra = d.get('risk_assessment')
+            if ra:
+                _upsert_jc_ra(conn, jid, ra)
+            conn.commit()
+        return jsonify({'status': 'ok', 'id': jid, 'work_order_number': wo})
+    except Exception as e:
+        logger.error(f"create_job_card: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/api/job_cards/<int:jid>', methods=['PUT'])
+def update_job_card(jid):
+    d = safe_json(request)
+    try:
+        with get_db_context() as conn:
+            text_fields = [
+                'department','asset_equipment_number','asset_equipment_description',
+                'work_order_type','requested_by','responsible_employee','shift',
+                'job_description','fault_symptom','fault_area','fault_type',
+                'fault_cause','fault_remedy','tradesman_report',
+                'actual_start_date','actual_start_time','actual_end_date','actual_end_time',
+                'spares_used','follow_up_work',
+                'supervisor_comment','supervisor_name','supervisor_date','status',
+            ]
+            fields, params = [], []
+            for f in text_fields:
+                if f in d:
+                    fields.append(f'{f}=?')
+                    params.append(d[f])
+            for f in ('cleaned_up', 'follow_up_wo_needed', 'acceptance'):
+                if f in d:
+                    fields.append(f'{f}=?')
+                    params.append(1 if d[f] else 0)
+            if fields:
+                params.append(jid)
+                conn.execute(f"UPDATE job_cards SET {', '.join(fields)} WHERE id=?", params)
+            if 'resources' in d:
+                conn.execute("DELETE FROM job_card_resources WHERE job_card_id=?", (jid,))
+                for res in (d['resources'] or []):
+                    conn.execute(
+                        "INSERT INTO job_card_resources (job_card_id,entry_date,name,company_no,time_entry)"
+                        " VALUES (?,?,?,?,?)",
+                        (jid, res.get('entry_date'), res.get('name'),
+                         res.get('company_no'), res.get('time_entry'))
+                    )
+            if d.get('risk_assessment'):
+                _upsert_jc_ra(conn, jid, d['risk_assessment'])
+            conn.commit()
+        return jsonify({'status': 'ok'})
+    except Exception as e:
+        logger.error(f"update_job_card {jid}: {e}", exc_info=True)
+        return jsonify({'status': 'error'}), 500
 
 
 # ---- Background Scheduler ----

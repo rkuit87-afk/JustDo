@@ -992,6 +992,7 @@ def init_db():
             machine_id   INTEGER NOT NULL REFERENCES ss_machines(id),
             part_name    TEXT    NOT NULL,
             part_number  TEXT,
+            part_type    TEXT    NOT NULL DEFAULT 'Mechanical',
             active       INTEGER NOT NULL DEFAULT 1,
             created_at   TEXT    DEFAULT (datetime('now'))
         )''')
@@ -1025,6 +1026,87 @@ def init_db():
             duration_mins INTEGER NOT NULL,
             notes         TEXT,
             logged_at     TEXT    DEFAULT (datetime('now'))
+        )''')
+
+        # ── NEWINGTON MILL JOB CARDS ─────────────────────────────────────────
+        c.execute('''CREATE TABLE IF NOT EXISTS job_cards (
+            id                              INTEGER PRIMARY KEY AUTOINCREMENT,
+            work_order_number               TEXT UNIQUE,
+            request_date                    TEXT,
+            request_time                    TEXT,
+            department                      TEXT,
+            asset_equipment_number          TEXT,
+            asset_equipment_description     TEXT,
+            work_order_type                 TEXT,
+            requested_by                    TEXT,
+            requested_by_id                 INTEGER,
+            responsible_employee            TEXT,
+            responsible_employee_id         INTEGER,
+            shift                           TEXT DEFAULT 'Day',
+            job_description                 TEXT,
+            fault_symptom                   TEXT,
+            fault_area                      TEXT,
+            fault_type                      TEXT,
+            fault_cause                     TEXT,
+            fault_remedy                    TEXT,
+            tradesman_report                TEXT,
+            actual_start_date               TEXT,
+            actual_start_time               TEXT,
+            actual_end_date                 TEXT,
+            actual_end_time                 TEXT,
+            spares_used                     TEXT,
+            cleaned_up                      INTEGER DEFAULT 0,
+            follow_up_work                  TEXT,
+            follow_up_wo_needed             INTEGER DEFAULT 0,
+            supervisor_comment              TEXT,
+            supervisor_name                 TEXT,
+            supervisor_date                 TEXT,
+            acceptance                      INTEGER DEFAULT 0,
+            status                          TEXT NOT NULL DEFAULT 'open',
+            breakdown_id                    INTEGER REFERENCES breakdowns(id),
+            task_id                         INTEGER,
+            created_at                      TEXT DEFAULT (datetime('now'))
+        )''')
+
+        c.execute('''CREATE TABLE IF NOT EXISTS job_card_resources (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_card_id INTEGER NOT NULL REFERENCES job_cards(id),
+            entry_date  TEXT,
+            name        TEXT,
+            company_no  TEXT,
+            time_entry  TEXT
+        )''')
+
+        c.execute('''CREATE TABLE IF NOT EXISTS job_card_risk_assessments (
+            id                                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_card_id                         INTEGER NOT NULL UNIQUE REFERENCES job_cards(id),
+            hazard_slip_trip                    INTEGER DEFAULT 0,
+            hazard_splashes_flying_debris       INTEGER DEFAULT 0,
+            hazard_hot_surfaces                 INTEGER DEFAULT 0,
+            hazard_manual_handling              INTEGER DEFAULT 0,
+            hazard_chemicals_dust_gases         INTEGER DEFAULT 0,
+            hazard_collapse_overturn            INTEGER DEFAULT 0,
+            hazard_pressure_stored_energy       INTEGER DEFAULT 0,
+            hazard_work_at_height               INTEGER DEFAULT 0,
+            hazard_heavy_lifting                INTEGER DEFAULT 0,
+            hazard_sharp_edges_low_clearance    INTEGER DEFAULT 0,
+            hazard_sudden_release_hand_tools    INTEGER DEFAULT 0,
+            hazard_electricity_buried_services  INTEGER DEFAULT 0,
+            hazard_vehicle_pit_movement         INTEGER DEFAULT 0,
+            hazard_machinery_movement           INTEGER DEFAULT 0,
+            hazard_high_noise                   INTEGER DEFAULT 0,
+            hazard_fire_explosion               INTEGER DEFAULT 0,
+            hazard_confined_space_excavation    INTEGER DEFAULT 0,
+            hazard_other                        TEXT,
+            competent_to_do_job                 INTEGER DEFAULT 0,
+            medically_fit                       INTEGER DEFAULT 0,
+            safe_easy_access                    INTEGER DEFAULT 0,
+            requires_loto                       INTEGER DEFAULT 0,
+            permit_required                     INTEGER DEFAULT 0,
+            gates_guards_secure                 INTEGER DEFAULT 0,
+            coworkers_safe_before_testing       INTEGER DEFAULT 0,
+            correct_tools_ppe_used              INTEGER DEFAULT 0,
+            loto_mode                           TEXT
         )''')
 
         c.execute('''CREATE TABLE IF NOT EXISTS theme_settings (
@@ -1096,6 +1178,8 @@ def _run_migrations():
         # v10.3 — sawshop_admin role + scoped checklists
         ("form_templates",  "scope",                         "ALTER TABLE form_templates ADD COLUMN scope TEXT DEFAULT 'mill'"),
         ("requisitions",    "source_domain",                 "ALTER TABLE requisitions ADD COLUMN source_domain TEXT DEFAULT 'mill'"),
+        # v10.3 — sawshop part type
+        ("ss_parts",        "part_type",                     "ALTER TABLE ss_parts ADD COLUMN part_type TEXT NOT NULL DEFAULT 'Mechanical'"),
     ]
 
     with get_db_context() as conn:

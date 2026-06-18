@@ -342,12 +342,11 @@ hr{border:none;border-top:1px solid var(--border);margin:12px 0}
   <div id="art-log-job" class="tab-pane">
     <div class="card">
       <div class="card-title">Log Job Done Outside PM Schedule</div>
-      <div class="form-row"><label>Equipment</label>
-        <div style="display:flex;gap:8px;align-items:center">
-          <div id="artself-equip-display" style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:9px 12px;font-size:13px;color:var(--text3)">Tap to select machine…</div>
-          <button class="btn btn-ghost btn-sm" onclick="openTreePicker(artSelfEquipPicked)">🏭 Browse</button>
-        </div>
-        <select id="artself-equip" style="display:none"><option value="">Select equipment...</option></select>
+      <div class="form-row"><label>Area</label>
+        <select id="artself-area" onchange="filterEquipByArea('artself-area','artself-equip')"><option value="">Select area...</option></select>
+      </div>
+      <div class="form-row"><label>Machine</label>
+        <select id="artself-equip"><option value="">Select machine...</option></select>
       </div>
       <div class="form-row"><label>What did you do?</label>
         <textarea id="artself-desc" placeholder="Describe the work done..."></textarea>
@@ -696,14 +695,57 @@ hr{border:none;border-top:1px solid var(--border);margin:12px 0}
 
   <!-- Sawshop Machine Register -->
   <div id="mgr-ss-machines" class="tab-pane">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+
+    <!-- List view header (hidden when zoomed into a machine) -->
+    <div id="ss-machine-header" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
       <div>
         <div style="font-size:15px;font-weight:700;color:var(--text)">🔧 Machine Register</div>
-        <div style="font-size:12px;color:var(--text3);margin-top:2px">Sawshop → Machine → Type → Part → Part Number</div>
+        <div style="font-size:12px;color:var(--text3);margin-top:2px">Click a machine to manage its parts</div>
       </div>
       <button class="btn btn-primary btn-sm" onclick="openSsMachineModal()">＋ Add Machine</button>
     </div>
-    <div id="ss-machine-list"></div>
+
+    <!-- Zoom-out: machine list -->
+    <div id="ss-machine-list-view">
+      <div id="ss-machine-list"></div>
+    </div>
+
+    <!-- Zoom-in: machine detail + parts -->
+    <div id="ss-machine-detail-view" style="display:none">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+        <button class="btn btn-ghost btn-sm" onclick="ssMachineZoomOut()">← Machines</button>
+        <div>
+          <span id="ss-detail-machine-name" style="font-weight:700;font-size:15px;color:var(--text)"></span>
+          <span id="ss-detail-machine-type" style="font-size:12px;color:var(--text3);margin-left:8px;background:var(--surface2);padding:2px 8px;border-radius:10px"></span>
+        </div>
+      </div>
+      <div class="card">
+        <div style="font-weight:600;color:var(--text);margin-bottom:10px">Parts Register</div>
+        <div id="ss-parts-list" style="margin-bottom:12px"></div>
+        <!-- Add Part row -->
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-end;margin-top:4px">
+          <div style="flex:2;min-width:120px">
+            <div style="font-size:11px;color:var(--text3);margin-bottom:3px">Part Name *</div>
+            <input id="ss-part-name" placeholder="e.g. Drive Belt" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-size:13px;outline:none;box-sizing:border-box">
+          </div>
+          <div style="flex:1;min-width:90px">
+            <div style="font-size:11px;color:var(--text3);margin-bottom:3px">Part No.</div>
+            <input id="ss-part-number" placeholder="e.g. B-1234" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-size:13px;outline:none;box-sizing:border-box">
+          </div>
+          <div style="min-width:130px">
+            <div style="font-size:11px;color:var(--text3);margin-bottom:3px">Type</div>
+            <select id="ss-part-type" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-size:13px;outline:none">
+              <option value="Mechanical">Mechanical</option>
+              <option value="Consumable">Consumable</option>
+              <option value="Electrical">Electrical</option>
+            </select>
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="addSsPart()" style="align-self:flex-end">+ Add Part</button>
+        </div>
+        <span class="save-status" id="ss-part-status" style="margin-top:6px;display:block"></span>
+      </div>
+      <input type="hidden" id="ss-parts-machine-id">
+    </div>
 
     <!-- Add/Edit machine modal -->
     <div id="ss-machine-modal" class="modal" style="display:none">
@@ -724,24 +766,6 @@ hr{border:none;border-top:1px solid var(--border);margin:12px 0}
           <button class="btn btn-ghost btn-sm" onclick="document.getElementById('ss-machine-modal').style.display='none'">Cancel</button>
           <span class="save-status" id="ss-machine-status"></span>
         </div>
-      </div>
-    </div>
-
-    <!-- Parts sub-panel -->
-    <div id="ss-parts-panel" style="display:none;margin-top:16px">
-      <div class="card">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-          <div class="card-title" style="margin:0" id="ss-parts-title">Parts</div>
-          <button class="btn btn-ghost btn-xs" onclick="document.getElementById('ss-parts-panel').style.display='none'">✕ Close</button>
-        </div>
-        <div id="ss-parts-list" style="margin-bottom:12px"></div>
-        <div style="display:grid;grid-template-columns:2fr 1fr auto;gap:6px;align-items:end">
-          <input id="ss-part-name" placeholder="Part name *" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-size:13px;outline:none">
-          <input id="ss-part-number" placeholder="Part no." style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-size:13px;outline:none">
-          <button class="btn btn-primary btn-sm" onclick="addSsPart()">Add Part</button>
-        </div>
-        <input type="hidden" id="ss-parts-machine-id">
-        <span class="save-status" id="ss-part-status" style="margin-top:6px;display:block"></span>
       </div>
     </div>
   </div>
@@ -787,9 +811,6 @@ hr{border:none;border-top:1px solid var(--border);margin:12px 0}
         </div>
         <div class="form-row"><label>Description *</label>
           <textarea id="ss-job-desc" placeholder="Describe what failed or what needs attention..."></textarea>
-        </div>
-        <div class="form-row"><label>Assign artisan</label>
-          <select id="ss-job-artisan"><option value="">— assign later —</option></select>
         </div>
         <div style="display:flex;gap:8px;margin-top:16px">
           <button class="btn btn-primary btn-sm" onclick="saveSsJob()">Log Breakdown</button>
@@ -894,6 +915,7 @@ hr{border:none;border-top:1px solid var(--border);margin:12px 0}
     <button class="nav-tab" id="components-nav-tab" style="display:none;color:var(--blue)" onclick="adTab('components',this)">🔩 Components</button>
     <button class="nav-tab" id="req-handling-nav-tab" style="display:none;color:var(--purple)" onclick="adTab('reqhandling',this)">📋 Req. Handling</button>
     <button class="nav-tab" id="ad-ss-nav-tab" style="display:none;color:var(--cyan)" onclick="adTab('sawshop',this);loadAdminSawshop()">🔧 Sawshop</button>
+    <button class="nav-tab" onclick="adTab('jobcards',this);loadAdminJobCards()">📋 Job Cards</button>
   </div>
 
   <!-- Schedule -->
@@ -939,8 +961,8 @@ hr{border:none;border-top:1px solid var(--border);margin:12px 0}
       <div class="form-row" id="alloc-equip-row" style="display:none"><label>Machine</label>
         <select id="alloc-equip"><option value="">Select machine...</option></select>
       </div>
-      <div class="form-row"><label>Assign to</label>
-        <select id="alloc-user"><option value="">Select artisan...</option></select>
+      <div class="form-row"><label>Assign to Team Leader</label>
+        <select id="alloc-user"><option value="">Select team leader…</option></select>
       </div>
       <div class="form-row"><label>Job description (shown to artisan)</label>
         <textarea id="alloc-description" placeholder="Describe what needs to be done..." style="min-height:70px"></textarea>
@@ -1493,6 +1515,15 @@ hr{border:none;border-top:1px solid var(--border);margin:12px 0}
     <div id="ad-ss-breakdowns"></div>
   </div>
 
+  <!-- Job Cards -->
+  <div id="ad-tab-jobcards" class="tab-pane">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <div style="font-size:15px;font-weight:700;color:var(--text)">📋 Job Cards</div>
+      <button class="btn btn-primary btn-sm" onclick="openJobCardModal({})">＋ New Job Card</button>
+    </div>
+    <div id="jc-admin-list"><div class="empty-state">No job cards yet</div></div>
+  </div>
+
   <!-- Activity -->
   <div id="ad-tab-activity" class="tab-pane">
     <div id="ad-activity-list"></div>
@@ -1859,6 +1890,260 @@ hr{border:none;border-top:1px solid var(--border);margin:12px 0}
     <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:12px">
       <button class="btn btn-ghost" onclick="document.getElementById('edit-job-modal').classList.remove('open')">Cancel</button>
       <button class="btn btn-primary" onclick="submitEditJob()">Save Changes</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== REASSIGN TASK MODAL =========== -->
+<div id="reassign-modal" class="modal-overlay">
+  <div class="modal" style="max-width:360px;width:100%">
+    <h3>Reassign Job to Artisan</h3>
+    <div id="reassign-job-title" style="font-size:13px;color:var(--text3);margin-bottom:14px;font-style:italic"></div>
+    <div class="form-row"><label>Assign to Artisan</label>
+      <select id="reassign-artisan"><option value="">Select artisan…</option></select>
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px">
+      <button class="btn btn-ghost" onclick="document.getElementById('reassign-modal').classList.remove('open')">Cancel</button>
+      <button class="btn btn-primary" onclick="submitReassign()">Reassign</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== JOB CARD MODAL =============== -->
+<div id="jc-modal" class="modal-overlay">
+  <div class="modal" style="max-width:680px;width:100%;padding:0;max-height:90vh;overflow-y:auto">
+    <!-- Sticky header -->
+    <div style="background:var(--surface2);padding:14px 18px;border-bottom:1px solid var(--border);position:sticky;top:0;z-index:2;display:flex;justify-content:space-between;align-items:center">
+      <div>
+        <div style="font-size:15px;font-weight:700;color:var(--text)">📋 Newington Mill Job Card</div>
+        <div id="jc-wo-display" style="font-size:12px;color:var(--blue);margin-top:2px">New — WO# auto-assigned on save</div>
+      </div>
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('jc-modal').classList.remove('open')">✕</button>
+    </div>
+
+    <div style="padding:16px 18px">
+
+      <!-- Request Details -->
+      <div style="background:var(--surface2);border-radius:10px;padding:14px;margin-bottom:10px">
+        <div style="font-size:12px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">Request Details</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div class="form-row" style="margin:0"><label>Work Order Type</label>
+            <select id="jc-wo-type">
+              <option value="Breakdown">Breakdown</option>
+              <option value="Corrective Action">Corrective Action</option>
+              <option value="Modification">Modification</option>
+              <option value="Unscheduled PM">Unscheduled PM</option>
+              <option value="Inspection">Inspection</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
+          <div class="form-row" style="margin:0"><label>Shift</label>
+            <select id="jc-shift"><option>Day</option><option>Night</option></select>
+          </div>
+          <div class="form-row" style="margin:0"><label>Request Date</label>
+            <input id="jc-request-date" type="date">
+          </div>
+          <div class="form-row" style="margin:0"><label>Request Time</label>
+            <input id="jc-request-time" type="time">
+          </div>
+          <div class="form-row" style="margin:0;grid-column:1/-1"><label>Department / Area</label>
+            <input id="jc-department" placeholder="e.g. Wetmill, Sawshop, Dryer…">
+          </div>
+        </div>
+      </div>
+
+      <!-- Asset & Personnel -->
+      <div style="background:var(--surface2);border-radius:10px;padding:14px;margin-bottom:10px">
+        <div style="font-size:12px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">Asset & Personnel</div>
+        <div class="form-row" style="margin-bottom:8px"><label>Equipment / Asset Description</label>
+          <input id="jc-asset-desc" placeholder="Machine name or description">
+        </div>
+        <div class="form-row" style="margin-bottom:8px"><label>Asset / Equipment Number</label>
+          <input id="jc-asset-no" placeholder="Asset tag (if applicable)">
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div class="form-row" style="margin:0"><label>Requested By</label>
+            <input id="jc-requested-by" placeholder="Your name">
+          </div>
+          <div class="form-row" style="margin:0"><label>Responsible Employee</label>
+            <input id="jc-responsible" placeholder="Attending artisan">
+          </div>
+        </div>
+      </div>
+
+      <!-- Job Description -->
+      <div style="background:var(--surface2);border-radius:10px;padding:14px;margin-bottom:10px">
+        <div style="font-size:12px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">Job Description</div>
+        <div class="form-row" style="margin:0">
+          <textarea id="jc-job-desc" placeholder="Describe the job / fault observed…" style="min-height:70px"></textarea>
+        </div>
+      </div>
+
+      <!-- Root Cause Analysis -->
+      <div style="background:var(--surface2);border-radius:10px;padding:14px;margin-bottom:10px">
+        <div style="font-size:12px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">Root Cause Analysis</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div class="form-row" style="margin:0"><label>Fault Symptom</label>
+            <select id="jc-fault-symptom">
+              <option value="">— Select —</option>
+              <option>Vibration</option><option>Noise</option><option>Overheating</option>
+              <option>Leaking</option><option>No movement</option><option>Intermittent fault</option>
+              <option>Electrical fault</option><option>Breakage</option><option>Wear</option><option>Other</option>
+            </select>
+          </div>
+          <div class="form-row" style="margin:0"><label>Fault Area</label>
+            <input id="jc-fault-area" placeholder="e.g. Drive, Conveyor…">
+          </div>
+          <div class="form-row" style="margin:0"><label>Fault Type</label>
+            <select id="jc-fault-type">
+              <option value="">— Select —</option>
+              <option>Mechanical</option><option>Electrical</option><option>Hydraulic</option>
+              <option>Pneumatic</option><option>Instrumentation</option><option>Structural</option>
+              <option>Operator Error</option><option>Wear &amp; Tear</option><option>Other</option>
+            </select>
+          </div>
+          <div class="form-row" style="margin:0"><label>Fault Cause</label>
+            <input id="jc-fault-cause" placeholder="Root cause of failure">
+          </div>
+        </div>
+        <div class="form-row" style="margin-top:8px;margin-bottom:8px"><label>Fault Remedy</label>
+          <input id="jc-fault-remedy" placeholder="Action taken to resolve">
+        </div>
+        <div class="form-row" style="margin:0"><label>Tradesman Report</label>
+          <textarea id="jc-tradesman-report" placeholder="Detailed report of work done…" style="min-height:60px"></textarea>
+        </div>
+      </div>
+
+      <!-- Actual Work Times -->
+      <div style="background:var(--surface2);border-radius:10px;padding:14px;margin-bottom:10px">
+        <div style="font-size:12px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">Actual Work Times</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div class="form-row" style="margin:0"><label>Start Date</label><input id="jc-start-date" type="date"></div>
+          <div class="form-row" style="margin:0"><label>Start Time</label><input id="jc-start-time" type="time"></div>
+          <div class="form-row" style="margin:0"><label>End Date</label><input id="jc-end-date" type="date"></div>
+          <div class="form-row" style="margin:0"><label>End Time</label><input id="jc-end-time" type="time"></div>
+        </div>
+      </div>
+
+      <!-- Spares & Housekeeping -->
+      <div style="background:var(--surface2);border-radius:10px;padding:14px;margin-bottom:10px">
+        <div style="font-size:12px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">Spares &amp; Housekeeping</div>
+        <div class="form-row" style="margin-bottom:8px"><label>Spares Used</label>
+          <textarea id="jc-spares" placeholder="List spares used during the job…"></textarea>
+        </div>
+        <div class="form-row" style="margin-bottom:8px">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:normal">
+            <input type="checkbox" id="jc-cleaned-up"> Area cleaned and made safe
+          </label>
+        </div>
+        <div class="form-row" style="margin-bottom:8px"><label>Follow-Up Work Required</label>
+          <input id="jc-followup" placeholder="Describe outstanding work…">
+        </div>
+        <div class="form-row" style="margin:0">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:normal">
+            <input type="checkbox" id="jc-followup-wo"> Follow-up work order needed
+          </label>
+        </div>
+      </div>
+
+      <!-- Resource Log -->
+      <div style="background:var(--surface2);border-radius:10px;padding:14px;margin-bottom:10px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <div style="font-size:12px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.05em">Resource Log</div>
+          <button class="btn btn-ghost btn-sm" onclick="jcAddResource()">＋ Add Row</button>
+        </div>
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          <thead>
+            <tr style="color:var(--text3)">
+              <th style="text-align:left;padding:3px 6px;font-weight:600;width:110px">Date</th>
+              <th style="text-align:left;padding:3px 6px;font-weight:600">Name</th>
+              <th style="text-align:left;padding:3px 6px;font-weight:600;width:80px">Co. No.</th>
+              <th style="text-align:left;padding:3px 6px;font-weight:600;width:70px">Time</th>
+              <th style="width:28px"></th>
+            </tr>
+          </thead>
+          <tbody id="jc-resources-body">
+            <tr><td colspan="5" style="color:var(--text3);font-size:12px;padding:8px 6px">No entries — click ＋ Add Row</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Risk Assessment -->
+      <div style="background:var(--surface2);border-radius:10px;padding:14px;margin-bottom:10px">
+        <div style="font-size:12px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">Risk Assessment</div>
+        <div style="font-size:11px;font-weight:700;color:var(--text3);margin-bottom:8px">POTENTIAL HAZARDS — tick all that apply</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 16px;margin-bottom:14px">
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="jc-ra-slip_trip"> Slip or trip</label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="jc-ra-splashes_flying_debris"> Splashes / flying debris</label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="jc-ra-hot_surfaces"> Hot surfaces</label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="jc-ra-manual_handling"> Manual handling</label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="jc-ra-chemicals_dust_gases"> Chemicals / dust / gases</label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="jc-ra-collapse_overturn"> Collapse / overturn</label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="jc-ra-pressure_stored_energy"> Pressure / stored energy</label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="jc-ra-work_at_height"> Work at height</label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="jc-ra-heavy_lifting"> Heavy lifting</label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="jc-ra-sharp_edges_low_clearance"> Sharp edges / low clearance</label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="jc-ra-sudden_release_hand_tools"> Sudden release / hand tools</label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="jc-ra-electricity_buried_services"> Electricity / buried services</label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="jc-ra-vehicle_pit_movement"> Vehicle / pit movement</label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="jc-ra-machinery_movement"> Machinery movement</label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="jc-ra-high_noise"> High noise</label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="jc-ra-fire_explosion"> Fire / explosion</label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="jc-ra-confined_space_excavation"> Confined space / excavation</label>
+        </div>
+        <div class="form-row" style="margin-bottom:12px"><label>Other hazards</label>
+          <input id="jc-ra-other" placeholder="Describe any additional hazards…">
+        </div>
+        <div style="font-size:11px;font-weight:700;color:var(--text3);margin-bottom:8px">SELF-ASSESSMENT</div>
+        <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px">
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="jc-ra-competent"> I am competent to perform this job</label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="jc-ra-fit"> I am medically fit</label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="jc-ra-access"> Safe and easy access is available</label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="jc-ra-loto"> LOTO required</label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="jc-ra-permit"> Permit required</label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="jc-ra-guards"> Gates / guards secured before starting</label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="jc-ra-coworkers"> Co-workers are safe before testing</label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="jc-ra-ppe"> Correct tools / PPE used</label>
+        </div>
+        <div class="form-row" style="margin:0"><label>LOTO Mode</label>
+          <select id="jc-loto-mode">
+            <option value="">— Not applicable —</option>
+            <option>Working outside guarding</option>
+            <option>Working through interlock guard</option>
+            <option>Working inside guarding (LOTO)</option>
+            <option>Disassembly (LOTO)</option>
+            <option>Hazardous energy present</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Supervisor Sign-Off -->
+      <div style="background:var(--surface2);border-radius:10px;padding:14px;margin-bottom:14px">
+        <div style="font-size:12px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">Supervisor Sign-Off</div>
+        <div class="form-row" style="margin-bottom:8px"><label>Supervisor Comment</label>
+          <textarea id="jc-sup-comment" placeholder="Supervisor's remarks…"></textarea>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div class="form-row" style="margin:0"><label>Supervisor Name</label>
+            <input id="jc-sup-name" placeholder="Full name">
+          </div>
+          <div class="form-row" style="margin:0"><label>Date</label>
+            <input id="jc-sup-date" type="date">
+          </div>
+        </div>
+        <div class="form-row" style="margin-top:8px;margin:0">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:normal;margin-top:8px">
+            <input type="checkbox" id="jc-acceptance"> Job accepted / satisfactory
+          </label>
+        </div>
+      </div>
+
+      <!-- Action buttons -->
+      <div style="display:flex;gap:10px;justify-content:flex-end;padding-bottom:4px;align-items:center">
+        <span id="jc-save-status" class="save-status"></span>
+        <button class="btn btn-ghost" onclick="document.getElementById('jc-modal').classList.remove('open')">Cancel</button>
+        <button class="btn btn-primary" onclick="saveJobCard()">💾 Save Job Card</button>
+      </div>
     </div>
   </div>
 </div>
@@ -2509,10 +2794,9 @@ async function showArtisanBoard() {
     artSsManageTab.style.display = session.user.role === 'team_leader' ? '' : 'none';
   }
 
-  // Populate equipment select
-  const sel = document.getElementById('artself-equip');
-  sel.innerHTML = '<option value="">Select equipment...</option>';
-  equipment.forEach(e => sel.innerHTML += `<option value="${e.id}">${e.name}</option>`);
+  // Populate area → machine selects (same pattern as supervisor/manager)
+  populateAreaDropdown('artself-area', 'Select area...');
+  document.getElementById('artself-equip').innerHTML = '<option value="">Select machine...</option>';
 
   // Load tasks + pending time reviews
   const data = await api(`/api/tasks/${session.user.id}`);
@@ -2560,7 +2844,8 @@ function renderArtTasks(tasks, bds, reviews=[]) {
   }
 
   if (tasks.length) {
-    html += `<div class="section-title">PM Tasks This Week (${tasks.length})</div>`;
+    const isTL = session.user?.role === 'team_leader';
+    html += `<div class="section-title">${isTL ? 'Allocated Jobs' : 'PM Tasks This Week'} (${tasks.length})</div>`;
     tasks.forEach(t => {
       const checklist = (t.checklist||[]).map((c,i) =>
         `<div class="checklist-item">
@@ -2575,6 +2860,7 @@ function renderArtTasks(tasks, bds, reviews=[]) {
         ${checklist ? `<div style="margin-top:10px">${checklist}</div>` : ''}
         <div class="bd-actions" style="margin-top:10px">
           <button class="btn btn-success btn-sm" onclick="openTaskComplete(${t.id})">Mark Done</button>
+          ${isTL ? `<button class="btn btn-ghost btn-sm" style="color:var(--blue)" onclick="openReassignModal(${t.id},${JSON.stringify(t.title)})">👤 Reassign</button>` : ''}
           <button class="btn btn-ghost btn-sm" onclick="suspendTask(${t.id})" style="color:var(--amber)">Can't do it yet</button>
         </div>
       </div>`;
@@ -2726,8 +3012,25 @@ async function submitArtComplete() {
     : `/api/breakdowns/${currentBdId}/artisan`;
   await api(endpoint, 'POST', data);
   document.getElementById('art-complete-modal').classList.remove('open');
-  showToast('Breakdown completed','green');
   showArtisanBoard();
+  // Open job card pre-filled with breakdown data (skip for review submissions)
+  if (!_artIsReview) {
+    showToast('Breakdown closed — complete the job card below', 'green');
+    openJobCardModal({
+      breakdown_id: currentBdId,
+      breakdown_data: {
+        description: data.description,
+        failure_type: data.failure_type,
+        repair_action: data.repair_action,
+        art_time_start: data.art_time_start,
+        art_time_end: data.art_time_end,
+        failed_component: data.failed_component,
+        artisan_name: data.artisan_name,
+      },
+    });
+  } else {
+    showToast('Breakdown completed', 'green');
+  }
 }
 
 
@@ -2846,23 +3149,17 @@ async function loadArtBreakdowns() {
 }
 
 async function submitSelfLog() {
-  const equipId = document.getElementById('artself-equip').value;
   const desc = document.getElementById('artself-desc').value.trim();
-  const outcome = document.getElementById('artself-outcome').value;
-  if (!desc) { showToast('Please describe the work done.','amber'); return; }
-  const week = getWeekStart();
-  await api('/api/tasks/allocate', 'POST', {
-    title: 'Self-logged: ' + desc.substring(0,40),
-    equipment_id: equipId ? parseInt(equipId) : null,
-    assigned_to: session.user.id,
-    description: desc,
+  if (!desc) { showToast('Please describe the work done.', 'amber'); return; }
+  const equipSel = document.getElementById('artself-equip');
+  const equipText = equipSel.options[equipSel.selectedIndex]?.text || '';
+  const taskEquip = (equipText && equipText !== 'Select machine...') ? equipText : '';
+  openJobCardModal({
+    task_desc: desc,
+    task_equip: taskEquip,
+    task_artisan: session.user?.name,
+    wo_type: 'Corrective Action',
   });
-  // Immediately mark done
-  const tasks = await api(`/api/tasks/${session.user.id}`);
-  const task = (tasks?.tasks||[]).find(t => t.title.startsWith('Self-logged:'));
-  if (task) await api(`/api/tasks/${task.id}/complete`, 'POST', {completed_by: session.user.id, outcome, notes: desc, condition:'', parts:[], checklist:{}});
-  document.getElementById('artself-desc').value = '';
-  showToast('Job logged','green');
 }
 
 // ========================================================
@@ -3724,8 +4021,20 @@ async function showAdminBoard() {
   document.getElementById('alloc-equip').innerHTML = '<option value="">Select machine...</option>';
   document.getElementById('alloc-equip-row').style.display = 'none';
 
-  // Populate alloc user
-  populateArtisanDropdown('alloc-user');
+  // Populate alloc-user: team leaders first; artisans in secondary group (admin = Engineering admin can assign both)
+  (function() {
+    const sel = document.getElementById('alloc-user');
+    if (!sel) return;
+    const tls  = (users||[]).filter(u => u.role === 'team_leader');
+    const arts = (users||[]).filter(u => u.role === 'artisan');
+    sel.innerHTML = '<option value="">Select team leader…</option>';
+    tls.forEach(u => sel.innerHTML += `<option value="${u.id}">${u.name}</option>`);
+    if (arts.length) {
+      sel.innerHTML += `<optgroup label="── Direct to Artisan (Engineering Admin) ──">`;
+      arts.forEach(u => sel.innerHTML += `<option value="${u.id}">${u.name}</option>`);
+      sel.innerHTML += '</optgroup>';
+    }
+  })();
 
   // Load templates
   templates = await api('/api/templates') || {};
@@ -3896,6 +4205,11 @@ async function submitAllocation() {
     });
   }
 
+  // Capture equip display before resetting form
+  const _allocEquipEl = document.getElementById('alloc-equip');
+  const _allocEquipName = _allocEquipEl.options[_allocEquipEl.selectedIndex]?.text || '';
+  const _allocArtisan = (allUsers||[]).find(u => u.id === parseInt(userId));
+
   document.getElementById('alloc-title').value = '';
   document.getElementById('alloc-items').innerHTML = '';
   document.getElementById('alloc-description').value = '';
@@ -3906,7 +4220,9 @@ async function submitAllocation() {
   document.getElementById('alloc-area').value = '';
   document.getElementById('alloc-equip').innerHTML = '<option value="">Select machine...</option>';
   document.getElementById('alloc-equip-row').style.display = 'none';
-  showToast('Job allocated - now on artisan board','green');
+
+  const assigneeName = _allocArtisan?.name || 'team leader';
+  showToast(`Job allocated to ${assigneeName}`, 'green');
 }
 
 async function loadCompliance() {
@@ -6241,6 +6557,314 @@ async function loadPickerLowStock() {
       </div>
     </div>`).join('');
 }
+
+// ============================================================
+// TEAM LEADER — REASSIGN TASK TO ARTISAN
+// ============================================================
+let _reassignTaskId = null;
+
+function openReassignModal(taskId, title) {
+  _reassignTaskId = taskId;
+  document.getElementById('reassign-job-title').textContent = title;
+  const sel = document.getElementById('reassign-artisan');
+  sel.innerHTML = '<option value="">Select artisan…</option>';
+  (users||[]).filter(u => u.role === 'artisan').forEach(u => {
+    sel.innerHTML += `<option value="${u.id}">${u.name}</option>`;
+  });
+  document.getElementById('reassign-modal').classList.add('open');
+}
+
+async function submitReassign() {
+  const artisanId = document.getElementById('reassign-artisan').value;
+  if (!artisanId) { showToast('Select an artisan first', 'amber'); return; }
+  const result = await api(`/api/tasks/${_reassignTaskId}/reassign`, 'POST', { assigned_to: parseInt(artisanId) });
+  if (result?.status === 'ok') {
+    document.getElementById('reassign-modal').classList.remove('open');
+    showToast('Job reassigned to artisan', 'green');
+    showArtisanBoard();
+  } else {
+    showToast('Could not reassign — try again', 'red');
+  }
+}
+
+// ============================================================
+// NEWINGTON MILL JOB CARDS
+// ============================================================
+let _jcId = null;
+let _jcBreakdownId = null;
+let _jcTaskId = null;
+let _jcResources = [];
+
+const _jcRaHazards = [
+  'slip_trip','splashes_flying_debris','hot_surfaces','manual_handling',
+  'chemicals_dust_gases','collapse_overturn','pressure_stored_energy',
+  'work_at_height','heavy_lifting','sharp_edges_low_clearance',
+  'sudden_release_hand_tools','electricity_buried_services',
+  'vehicle_pit_movement','machinery_movement','high_noise',
+  'fire_explosion','confined_space_excavation',
+];
+const _jcRaSelfMap = {
+  competent: 'competent_to_do_job',
+  fit:        'medically_fit',
+  access:     'safe_easy_access',
+  loto:       'requires_loto',
+  permit:     'permit_required',
+  guards:     'gates_guards_secure',
+  coworkers:  'coworkers_safe_before_testing',
+  ppe:        'correct_tools_ppe_used',
+};
+
+async function loadAdminJobCards() {
+  const cards = await api('/api/job_cards') || [];
+  const el = document.getElementById('jc-admin-list');
+  if (!el) return;
+  if (!cards.length) { el.innerHTML = `<div class="empty-state">No job cards yet</div>`; return; }
+  const statusColor = {open:'var(--amber)',submitted:'var(--blue)',approved:'var(--green)',disputed:'var(--red)'};
+  el.innerHTML = cards.map(c => {
+    const date = (c.request_date || c.created_at || '').substring(0, 10);
+    const artisan = c.responsible_employee || '—';
+    const desc = (c.job_description || 'No description').substring(0, 70);
+    const status = c.status || 'open';
+    const sc = statusColor[status] || 'var(--text3)';
+    return `<div class="card" style="cursor:pointer;margin-bottom:8px" onclick="openJobCardModal({id:${c.id}})">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
+        <div style="min-width:0">
+          <div style="font-weight:700;font-size:13px;color:var(--blue)">${escHtml(c.work_order_number||'—')}</div>
+          <div style="font-size:13px;color:var(--text);margin-top:2px;word-break:break-word">${escHtml(desc)}</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:4px">${date} · ${escHtml(artisan)} · ${escHtml(c.work_order_type||'—')}</div>
+        </div>
+        <span style="flex-shrink:0;font-size:11px;color:${sc};background:${sc}22;padding:3px 9px;border-radius:20px;text-transform:capitalize">${status}</span>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function openJobCardModal(opts) {
+  _jcId = opts.id || null;
+  _jcBreakdownId = opts.breakdown_id || null;
+  _jcTaskId = opts.task_id || null;
+  _jcResources = [];
+
+  const today = new Date().toISOString().slice(0, 10);
+  const now   = new Date().toTimeString().slice(0, 5);
+
+  // Reset all fields
+  const textIds = [
+    'jc-wo-type','jc-shift','jc-department','jc-request-date','jc-request-time',
+    'jc-asset-desc','jc-asset-no','jc-requested-by','jc-responsible','jc-job-desc',
+    'jc-fault-symptom','jc-fault-area','jc-fault-type','jc-fault-cause','jc-fault-remedy',
+    'jc-tradesman-report','jc-start-date','jc-start-time','jc-end-date','jc-end-time',
+    'jc-spares','jc-followup','jc-sup-comment','jc-sup-name','jc-sup-date',
+    'jc-ra-other','jc-loto-mode',
+  ];
+  textIds.forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+  ['jc-cleaned-up','jc-followup-wo','jc-acceptance'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.checked = false;
+  });
+  _jcRaHazards.forEach(h => { const el = document.getElementById('jc-ra-'+h); if (el) el.checked = false; });
+  Object.keys(_jcRaSelfMap).forEach(s => { const el = document.getElementById('jc-ra-'+s); if (el) el.checked = false; });
+  jcRenderResources();
+  document.getElementById('jc-save-status').textContent = '';
+
+  if (_jcId) {
+    // Load existing card
+    document.getElementById('jc-wo-display').textContent = 'Loading…';
+    const jc = await api(`/api/job_cards/${_jcId}`);
+    if (!jc || jc.status === 'error') { showToast('Could not load job card', 'red'); return; }
+    document.getElementById('jc-wo-display').textContent = `WO# ${jc.work_order_number}`;
+    const setVal = (id, val) => { const el = document.getElementById(id); if (el) el.value = val || ''; };
+    const setChk = (id, val) => { const el = document.getElementById(id); if (el) el.checked = !!val; };
+    setVal('jc-wo-type', jc.work_order_type);
+    setVal('jc-shift', jc.shift);
+    setVal('jc-department', jc.department);
+    setVal('jc-request-date', jc.request_date);
+    setVal('jc-request-time', jc.request_time);
+    setVal('jc-asset-desc', jc.asset_equipment_description);
+    setVal('jc-asset-no', jc.asset_equipment_number);
+    setVal('jc-requested-by', jc.requested_by);
+    setVal('jc-responsible', jc.responsible_employee);
+    setVal('jc-job-desc', jc.job_description);
+    setVal('jc-fault-symptom', jc.fault_symptom);
+    setVal('jc-fault-area', jc.fault_area);
+    setVal('jc-fault-type', jc.fault_type);
+    setVal('jc-fault-cause', jc.fault_cause);
+    setVal('jc-fault-remedy', jc.fault_remedy);
+    setVal('jc-tradesman-report', jc.tradesman_report);
+    setVal('jc-start-date', jc.actual_start_date);
+    setVal('jc-start-time', jc.actual_start_time);
+    setVal('jc-end-date', jc.actual_end_date);
+    setVal('jc-end-time', jc.actual_end_time);
+    setVal('jc-spares', jc.spares_used);
+    setChk('jc-cleaned-up', jc.cleaned_up);
+    setVal('jc-followup', jc.follow_up_work);
+    setChk('jc-followup-wo', jc.follow_up_wo_needed);
+    setVal('jc-sup-comment', jc.supervisor_comment);
+    setVal('jc-sup-name', jc.supervisor_name);
+    setVal('jc-sup-date', jc.supervisor_date);
+    setChk('jc-acceptance', jc.acceptance);
+    _jcResources = (jc.resources || []).map(r => ({...r}));
+    jcRenderResources();
+    if (jc.risk_assessment) {
+      const ra = jc.risk_assessment;
+      _jcRaHazards.forEach(h => {
+        const el = document.getElementById('jc-ra-'+h);
+        if (el) el.checked = !!ra['hazard_'+h];
+      });
+      setVal('jc-ra-other', ra.hazard_other);
+      Object.entries(_jcRaSelfMap).forEach(([short, full]) => {
+        const el = document.getElementById('jc-ra-'+short);
+        if (el) el.checked = !!ra[full];
+      });
+      setVal('jc-loto-mode', ra.loto_mode);
+    }
+  } else {
+    // New card — defaults
+    document.getElementById('jc-wo-display').textContent = 'New — WO# auto-assigned on save';
+    document.getElementById('jc-request-date').value = today;
+    document.getElementById('jc-request-time').value = now;
+    document.getElementById('jc-requested-by').value = session.user?.name || '';
+    // Pre-fill from breakdown
+    if (opts.breakdown_data) {
+      const bd = opts.breakdown_data;
+      document.getElementById('jc-wo-type').value = 'Breakdown';
+      document.getElementById('jc-job-desc').value = bd.description || '';
+      document.getElementById('jc-fault-type').value = bd.failure_type || '';
+      document.getElementById('jc-fault-area').value = bd.failed_component || '';
+      document.getElementById('jc-fault-remedy').value = bd.repair_action || '';
+      document.getElementById('jc-tradesman-report').value = bd.repair_action || '';
+      document.getElementById('jc-responsible').value = bd.artisan_name || session.user?.name || '';
+      if (bd.asset_desc) document.getElementById('jc-asset-desc').value = bd.asset_desc;
+      if (bd.art_time_start) {
+        const [d,t] = _jcSplitDT(bd.art_time_start);
+        document.getElementById('jc-start-date').value = d;
+        document.getElementById('jc-start-time').value = t;
+      }
+      if (bd.art_time_end) {
+        const [d,t] = _jcSplitDT(bd.art_time_end);
+        document.getElementById('jc-end-date').value = d;
+        document.getElementById('jc-end-time').value = t;
+      }
+    }
+    // Pre-fill from allocation / self-log
+    if (opts.task_desc) document.getElementById('jc-job-desc').value = opts.task_desc;
+    if (opts.task_equip) document.getElementById('jc-asset-desc').value = opts.task_equip;
+    if (opts.task_artisan) document.getElementById('jc-responsible').value = opts.task_artisan;
+    if (opts.wo_type) document.getElementById('jc-wo-type').value = opts.wo_type;
+    if (opts.breakdown_id) document.getElementById('jc-wo-type').value = 'Breakdown';
+  }
+
+  document.getElementById('jc-modal').classList.add('open');
+}
+
+function _jcSplitDT(s) {
+  if (!s) return ['', ''];
+  const sep = s.includes('T') ? 'T' : ' ';
+  const [d, t=''] = s.split(sep);
+  return [d || '', t.substring(0, 5)];
+}
+
+function jcAddResource() {
+  _jcResources.push({ entry_date: '', name: '', company_no: '', time_entry: '' });
+  jcRenderResources();
+}
+
+function jcRemoveResource(idx) {
+  _jcResources.splice(idx, 1);
+  jcRenderResources();
+}
+
+function jcRenderResources() {
+  const el = document.getElementById('jc-resources-body');
+  if (!el) return;
+  if (!_jcResources.length) {
+    el.innerHTML = '<tr><td colspan="5" style="color:var(--text3);font-size:12px;padding:8px 6px">No entries — click ＋ Add Row</td></tr>';
+    return;
+  }
+  const s = 'background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:4px 7px;color:var(--text);font-size:12px;width:100%;outline:none';
+  el.innerHTML = _jcResources.map((r, i) => `<tr>
+    <td style="padding:3px 3px"><input type="date" value="${r.entry_date||''}" oninput="_jcResources[${i}].entry_date=this.value" style="${s}"></td>
+    <td style="padding:3px 3px"><input value="${escHtml(r.name||'')}" oninput="_jcResources[${i}].name=this.value" placeholder="Name" style="${s}"></td>
+    <td style="padding:3px 3px"><input value="${escHtml(r.company_no||'')}" oninput="_jcResources[${i}].company_no=this.value" placeholder="Co. No." style="${s}"></td>
+    <td style="padding:3px 3px"><input value="${escHtml(r.time_entry||'')}" oninput="_jcResources[${i}].time_entry=this.value" placeholder="Hrs" style="${s}"></td>
+    <td style="padding:3px 3px"><button class="btn btn-ghost btn-xs" style="color:var(--red)" onclick="jcRemoveResource(${i})">✕</button></td>
+  </tr>`).join('');
+}
+
+function _jcBuildPayload() {
+  const ra = {};
+  _jcRaHazards.forEach(h => ra['hazard_'+h] = document.getElementById('jc-ra-'+h)?.checked ? 1 : 0);
+  ra.hazard_other = document.getElementById('jc-ra-other')?.value || '';
+  Object.entries(_jcRaSelfMap).forEach(([short, full]) => {
+    ra[full] = document.getElementById('jc-ra-'+short)?.checked ? 1 : 0;
+  });
+  ra.loto_mode = document.getElementById('jc-loto-mode')?.value || '';
+  const g = id => document.getElementById(id)?.value || '';
+  const c = id => !!document.getElementById(id)?.checked;
+  return {
+    work_order_type: g('jc-wo-type'),
+    shift:           g('jc-shift'),
+    department:      g('jc-department'),
+    request_date:    g('jc-request-date'),
+    request_time:    g('jc-request-time'),
+    asset_equipment_description: g('jc-asset-desc'),
+    asset_equipment_number:      g('jc-asset-no'),
+    requested_by:    g('jc-requested-by'),
+    requested_by_id: session.user?.id || null,
+    responsible_employee: g('jc-responsible'),
+    job_description:  g('jc-job-desc'),
+    fault_symptom:    g('jc-fault-symptom'),
+    fault_area:       g('jc-fault-area'),
+    fault_type:       g('jc-fault-type'),
+    fault_cause:      g('jc-fault-cause'),
+    fault_remedy:     g('jc-fault-remedy'),
+    tradesman_report: g('jc-tradesman-report'),
+    actual_start_date: g('jc-start-date'),
+    actual_start_time: g('jc-start-time'),
+    actual_end_date:   g('jc-end-date'),
+    actual_end_time:   g('jc-end-time'),
+    spares_used:       g('jc-spares'),
+    cleaned_up:        c('jc-cleaned-up'),
+    follow_up_work:    g('jc-followup'),
+    follow_up_wo_needed: c('jc-followup-wo'),
+    supervisor_comment: g('jc-sup-comment'),
+    supervisor_name:    g('jc-sup-name'),
+    supervisor_date:    g('jc-sup-date'),
+    acceptance:         c('jc-acceptance'),
+    resources:          _jcResources,
+    risk_assessment:    ra,
+  };
+}
+
+async function saveJobCard() {
+  const statusEl = document.getElementById('jc-save-status');
+  statusEl.textContent = 'Saving…';
+  const payload = _jcBuildPayload();
+  let result;
+  if (_jcId) {
+    result = await api(`/api/job_cards/${_jcId}`, 'PUT', payload);
+  } else {
+    if (_jcBreakdownId) payload.breakdown_id = _jcBreakdownId;
+    if (_jcTaskId)      payload.task_id      = _jcTaskId;
+    payload.status = _jcBreakdownId ? 'submitted' : 'open';
+    result = await api('/api/job_cards', 'POST', payload);
+    if (result?.id) {
+      _jcId = result.id;
+      document.getElementById('jc-wo-display').textContent = `WO# ${result.work_order_number}`;
+    }
+  }
+  if (result?.status === 'ok' || result?.id) {
+    statusEl.textContent = '✓ Saved';
+    showToast('Job card saved', 'green');
+    if (document.getElementById('jc-admin-list')) loadAdminJobCards();
+    setTimeout(() => {
+      document.getElementById('jc-modal').classList.remove('open');
+      statusEl.textContent = '';
+    }, 900);
+  } else {
+    statusEl.textContent = 'Error — try again';
+    showToast('Could not save job card', 'red');
+  }
+}
 </script>
 
 <div id="app-toast" class="toast"></div>
@@ -7190,15 +7814,14 @@ async function loadSsMachines() {
     return;
   }
   el.innerHTML = machines.map(m => `
-    <div class="card" style="margin-bottom:10px">
+    <div class="card" style="margin-bottom:10px;cursor:pointer;transition:box-shadow .15s" onmouseenter="this.style.boxShadow='0 2px 12px rgba(0,0,0,.18)'" onmouseleave="this.style.boxShadow=''" onclick="ssMachineZoomIn(${m.id},${JSON.stringify(m.name)},${JSON.stringify(m.machine_type)})">
       <div style="display:flex;justify-content:space-between;align-items:center">
         <div>
           <div style="font-weight:700;color:var(--text)">${escHtml(m.name)}</div>
-          <div style="font-size:12px;color:var(--text3);margin-top:2px">${escHtml(m.machine_type)} · ${m.part_count} part${m.part_count!==1?'s':''}</div>
+          <div style="font-size:12px;color:var(--text3);margin-top:2px">${escHtml(m.machine_type)} · ${m.part_count} part${m.part_count!==1?'s':''} <span style="color:var(--blue)">· tap to manage →</span></div>
         </div>
-        <div style="display:flex;gap:6px">
-          <button class="btn btn-ghost btn-xs" onclick="openSsPartsPanel(${m.id},'${escHtml(m.name)}')">🔩 Parts</button>
-          <button class="btn btn-ghost btn-xs" onclick="openSsMachineModal(${m.id},'${escHtml(m.name)}','${escHtml(m.machine_type)}')">Edit</button>
+        <div style="display:flex;gap:6px" onclick="event.stopPropagation()">
+          <button class="btn btn-ghost btn-xs" onclick="openSsMachineModal(${m.id},${JSON.stringify(m.name)},${JSON.stringify(m.machine_type)})">Edit</button>
           <button class="btn btn-ghost btn-xs" style="color:var(--red)" onclick="deleteSsMachine(${m.id})">✕</button>
         </div>
       </div>
@@ -7208,10 +7831,30 @@ async function loadSsMachines() {
 function openSsMachineModal(id='', name='', type='Mechanical') {
   document.getElementById('ss-machine-id').value = id;
   document.getElementById('ss-machine-name').value = name;
-  document.getElementById('ss-machine-type').value = type;
+  document.getElementById('ss-machine-type').value = type || 'Mechanical';
   document.getElementById('ss-machine-modal-title').textContent = id ? 'Edit Machine' : 'Add Machine';
   document.getElementById('ss-machine-status').textContent = '';
   document.getElementById('ss-machine-modal').style.display = 'flex';
+}
+
+function ssMachineZoomIn(machineId, machineName, machineType) {
+  document.getElementById('ss-parts-machine-id').value = machineId;
+  document.getElementById('ss-detail-machine-name').textContent = machineName;
+  document.getElementById('ss-detail-machine-type').textContent = machineType;
+  document.getElementById('ss-machine-list-view').style.display = 'none';
+  document.getElementById('ss-machine-header').style.display = 'none';
+  document.getElementById('ss-machine-detail-view').style.display = '';
+  document.getElementById('ss-part-name').value = '';
+  document.getElementById('ss-part-number').value = '';
+  document.getElementById('ss-part-type').value = 'Mechanical';
+  document.getElementById('ss-part-status').textContent = '';
+  loadSsParts(machineId);
+}
+
+function ssMachineZoomOut() {
+  document.getElementById('ss-machine-detail-view').style.display = 'none';
+  document.getElementById('ss-machine-list-view').style.display = '';
+  document.getElementById('ss-machine-header').style.display = 'flex';
 }
 
 async function saveSsMachine() {
@@ -7237,24 +7880,15 @@ async function deleteSsMachine(id) {
   loadSsMachines();
 }
 
-async function openSsPartsPanel(machineId, machineName) {
-  document.getElementById('ss-parts-machine-id').value = machineId;
-  document.getElementById('ss-parts-title').textContent = `Parts — ${machineName}`;
-  document.getElementById('ss-part-name').value = '';
-  document.getElementById('ss-part-number').value = '';
-  document.getElementById('ss-part-status').textContent = '';
-  document.getElementById('ss-parts-panel').style.display = 'block';
-  await loadSsParts(machineId);
-  document.getElementById('ss-parts-panel').scrollIntoView({ behavior: 'smooth' });
-}
-
 async function loadSsParts(machineId) {
   const parts = await api(`/api/ss/machines/${machineId}/parts`) || [];
   const el = document.getElementById('ss-parts-list');
-  if (!parts.length) { el.innerHTML = '<div style="color:var(--text3);font-size:13px">No parts yet.</div>'; return; }
-  el.innerHTML = `<table class="data-table"><thead><tr><th>Part Name</th><th>Part No.</th><th></th></tr></thead><tbody>${
+  if (!parts.length) { el.innerHTML = '<div style="color:var(--text3);font-size:13px;padding:8px 0">No parts yet — add one below.</div>'; return; }
+  const typeColor = { Mechanical:'var(--blue)', Consumable:'var(--amber)', Electrical:'var(--cyan)' };
+  el.innerHTML = `<table class="data-table"><thead><tr><th>Part Name</th><th>Type</th><th>Part No.</th><th></th></tr></thead><tbody>${
     parts.map(p => `<tr>
       <td>${escHtml(p.part_name)}</td>
+      <td><span style="font-size:11px;font-weight:600;color:${typeColor[p.part_type]||'var(--text3)'}">${p.part_type||'—'}</span></td>
       <td style="color:var(--text3)">${escHtml(p.part_number||'—')}</td>
       <td><button class="btn btn-ghost btn-xs" style="color:var(--red)" onclick="deleteSsPart(${p.id},${machineId})">✕</button></td>
     </tr>`).join('')
@@ -7265,13 +7899,14 @@ async function addSsPart() {
   const mid = document.getElementById('ss-parts-machine-id').value;
   const part_name = document.getElementById('ss-part-name').value.trim();
   const part_number = document.getElementById('ss-part-number').value.trim();
+  const part_type = document.getElementById('ss-part-type').value;
   const st = document.getElementById('ss-part-status');
   if (!part_name) { st.textContent = 'Part name required'; st.style.color = 'var(--red)'; return; }
-  const r = await api(`/api/ss/machines/${mid}/parts`, 'POST', { part_name, part_number });
+  const r = await api(`/api/ss/machines/${mid}/parts`, 'POST', { part_name, part_number, part_type });
   if (r && r.status === 'ok') {
     document.getElementById('ss-part-name').value = '';
     document.getElementById('ss-part-number').value = '';
-    st.textContent = 'Added'; st.style.color = 'var(--green)';
+    st.textContent = 'Added ✓'; st.style.color = 'var(--green)';
     await loadSsParts(mid);
   } else {
     st.textContent = 'Failed'; st.style.color = 'var(--red)';
@@ -7319,7 +7954,6 @@ async function loadSsJobs(tabBtn) {
         <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-start">
           <button class="btn btn-ghost btn-xs" onclick="openSsTimelogModal(${j.id},'${escHtml(j.machine_name||'')}')">⏱ Time</button>
           ${j.status !== 'closed' ? `
-            <button class="btn btn-ghost btn-xs" onclick="openSsAssignModal(${j.id},'${escHtml(j.assigned_name||'')}',${j.assigned_to||'null'})">👷 Assign</button>
             <button class="btn btn-success btn-xs" onclick="openSsCloseModal(${j.id})">✓ Close</button>
           ` : `<button class="btn btn-ghost btn-xs" onclick="reopenSsJob(${j.id})">↩ Reopen</button>`}
         </div>
@@ -7337,12 +7971,6 @@ async function openSsJobModal() {
   document.getElementById('ss-job-desc').value = '';
   document.getElementById('ss-job-status').textContent = '';
 
-  // Populate sawshop artisans
-  const users = await api('/api/users/by-role/artisan') || [];
-  const aSel = document.getElementById('ss-job-artisan');
-  aSel.innerHTML = '<option value="">— assign later —</option>' +
-    users.map(u => `<option value="${u.id}" data-name="${escHtml(u.name)}">${escHtml(u.name)}</option>`).join('');
-
   document.getElementById('ss-job-modal').style.display = 'flex';
 }
 
@@ -7359,15 +7987,11 @@ async function saveSsJob() {
   const part_id = document.getElementById('ss-job-part').value || null;
   const failure_type = document.getElementById('ss-job-failure').value;
   const description = document.getElementById('ss-job-desc').value.trim();
-  const artSel = document.getElementById('ss-job-artisan');
-  const assigned_to = artSel.value || null;
-  const assigned_name = assigned_to ? (artSel.options[artSel.selectedIndex].dataset.name || '') : null;
   const st = document.getElementById('ss-job-status');
   if (!description) { st.textContent = 'Description required'; st.style.color = 'var(--red)'; return; }
   const r = await api('/api/ss/breakdowns', 'POST', {
     machine_id, part_id, failure_type, description,
     logged_by: session.user.id, logged_by_name: session.user.name,
-    assigned_to: assigned_to ? parseInt(assigned_to) : null, assigned_name,
     downtime_start: new Date().toISOString()
   });
   if (r && r.status === 'ok') {
