@@ -3235,7 +3235,7 @@ def get_checklists():
     try:
         with get_db_context() as conn:
             rows = conn.execute(
-                "SELECT id,name,description,target_roles FROM form_templates WHERE active=1 ORDER BY name"
+                "SELECT id,name,description,target_roles FROM form_templates WHERE active=1 AND (scope IS NULL OR scope='mill') ORDER BY name"
             ).fetchall()
         result = []
         for r in rows:
@@ -3879,6 +3879,18 @@ def ss_add_checklist_field(tid):
         return jsonify({'status': 'error'}), 500
 
 
+@app.route('/api/ss/checklists/fields/<int:fid>', methods=['DELETE'])
+def ss_delete_checklist_field(fid):
+    try:
+        with get_db_context() as conn:
+            conn.execute("DELETE FROM form_fields WHERE id=?", (fid,))
+            conn.commit()
+        return jsonify({'status': 'ok'})
+    except Exception as e:
+        logger.error(f"ss_delete_checklist_field: {e}", exc_info=True)
+        return jsonify({'status': 'error'}), 500
+
+
 @app.route('/api/ss/checklists/<int:tid>/submit', methods=['POST'])
 def ss_submit_checklist(tid):
     """Submit a filled sawshop checklist."""
@@ -3890,7 +3902,7 @@ def ss_submit_checklist(tid):
                 return jsonify({'status': 'error', 'message': 'Template not found'}), 404
             cur = conn.execute(
                 "INSERT INTO form_submissions (template_id, submitted_by_name, submission_date, notes) VALUES (?,?,date('now'),?)",
-                (tid, d.get('submitted_by', 'Unknown'), d.get('notes', ''))
+                (tid, d.get('submitted_by_name') or d.get('submitted_by', 'Unknown'), d.get('notes', ''))
             )
             sid = cur.lastrowid
             for key, val in (d.get('values') or {}).items():

@@ -334,6 +334,7 @@ hr{border:none;border-top:1px solid var(--border);margin:12px 0}
     <button class="nav-tab" id="art-req-tab" style="display:none" onclick="showScreen('art-requisitions',this);loadMyRequisitions()">Requisitions</button>
     <button class="nav-tab" id="art-checklists-tab" style="display:none" onclick="showScreen('art-checklists',this);loadArtisanChecklists()">📋 Checklists</button>
     <button class="nav-tab" id="art-ss-jobs-tab" style="display:none" onclick="showScreen('art-ss-jobs',this);loadArtSsJobs()">🔧 SS Jobs</button>
+    <button class="nav-tab" id="art-ss-manage-tab" style="display:none" onclick="showScreen('art-ss-manage',this);loadSsManageQueue()">🔨 SS Queue</button>
   </div>
   <div id="art-tasks" class="tab-pane active">
     <div id="art-tasks-list"></div>
@@ -438,6 +439,12 @@ hr{border:none;border-top:1px solid var(--border);margin:12px 0}
         </div>
       </div>
     </div>
+  </div>
+
+  <!-- Sawshop Queue (team leader view — all open SS breakdowns) -->
+  <div id="art-ss-manage" class="tab-pane">
+    <div style="font-size:15px;font-weight:700;color:var(--text);margin-bottom:12px">🔨 Sawshop Breakdown Queue</div>
+    <div id="art-ss-manage-list"></div>
   </div>
 </div>
 
@@ -2485,10 +2492,21 @@ async function showArtisanBoard() {
     }
   }
 
-  // Show SS Jobs tab for sawshop artisans (always visible — their primary work)
+  // SS Jobs tab: always for sawshop role; for mill artisans only if they have assigned jobs
   const artSsTab = document.getElementById('art-ss-jobs-tab');
   if (artSsTab) {
-    artSsTab.style.display = session.user.role === 'sawshop' ? '' : 'none';
+    if (session.user.role === 'sawshop') {
+      artSsTab.style.display = '';
+    } else {
+      api(`/api/ss/breakdowns?artisan_id=${session.user.id}&status=open,in_progress`).then(jobs => {
+        artSsTab.style.display = (jobs && jobs.length) ? '' : 'none';
+      });
+    }
+  }
+  // SS Queue tab: team leaders see all open sawshop breakdowns to assign artisans
+  const artSsManageTab = document.getElementById('art-ss-manage-tab');
+  if (artSsManageTab) {
+    artSsManageTab.style.display = session.user.role === 'team_leader' ? '' : 'none';
   }
 
   // Populate equipment select
@@ -3274,19 +3292,19 @@ async function showSawshopAdminBoard() {
   populatePREquip();
 }
 
-// ── Sawshop Admin Checklist Management ───────────────────────
+// ── Sawshop Admin Checklist Management (inline accordion) ────
 
 async function loadSaChecklistAdmin(el) {
   const tmpls = await api('/api/ss/checklists') || [];
   let html = `
     <div class="card" style="margin-bottom:14px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-        <div class="card-title" style="margin:0">📋 Sawshop Checklist Templates</div>
+        <div class="card-title" style="margin:0">📋 Sawshop Checklists</div>
         <button class="btn btn-primary btn-sm" onclick="openSaNewTemplateForm()">＋ New Template</button>
       </div>
       <div id="sa-new-tmpl-form" style="display:none;background:var(--surface2);border-radius:8px;padding:12px;margin-bottom:12px">
         <div class="form-row"><label>Template Name *</label>
-          <input id="sa-tmpl-name" placeholder="e.g. Daily Blade Inspection">
+          <input id="sa-tmpl-name" placeholder="e.g. SawShop-Volmer-Spare-Request">
         </div>
         <div style="display:flex;gap:8px;margin-top:8px">
           <button class="btn btn-primary btn-sm" onclick="createSaTemplate()">Create</button>
@@ -3298,18 +3316,42 @@ async function loadSaChecklistAdmin(el) {
     html += '<div class="empty-state">No sawshop templates yet. Create one above.</div>';
   } else {
     html += tmpls.map(t => `
-      <div class="card" style="margin-bottom:10px;padding:12px">
-        <div style="display:flex;justify-content:space-between;align-items:center">
+      <div class="card" style="margin-bottom:10px;padding:0;overflow:hidden" id="sa-tmpl-card-${t.id}">
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 14px;cursor:pointer" onclick="saToggleTemplate(${t.id})">
           <div>
-            <div style="font-weight:700;color:var(--text)">${escHtml(t.name)}</div>
+            <div style="font-weight:700;color:var(--text);font-size:14px">${escHtml(t.name)}</div>
             <div style="font-size:11px;color:var(--text3);margin-top:2px">${t.field_count||0} field${(t.field_count||0)!==1?'s':''}</div>
           </div>
-          <div style="display:flex;gap:6px;flex-wrap:wrap">
-            <button class="btn btn-ghost btn-xs" onclick="openSaTemplateFields(${t.id},'${escHtml(t.name).replace(/'/g,"\\'")}')">⚙ Fields</button>
-            <button class="btn btn-ghost btn-xs" onclick="openSaChecklistFill(${t.id},'${escHtml(t.name).replace(/'/g,"\\'")}')">📝 Fill</button>
-            <button class="btn btn-ghost btn-xs" onclick="openSaChecklistHistory(${t.id},'${escHtml(t.name).replace(/'/g,"\\'")}')">📊 History</button>
-            <button class="btn btn-ghost btn-xs" style="color:var(--red)" onclick="deleteSaTemplate(${t.id})">✕</button>
+          <div style="display:flex;gap:8px;align-items:center">
+            <span id="sa-chevron-${t.id}" style="color:var(--text3);font-size:13px">▼</span>
+            <button class="btn btn-ghost btn-xs" style="color:var(--red)" onclick="event.stopPropagation();deleteSaTemplate(${t.id})">✕</button>
           </div>
+        </div>
+        <div id="sa-body-${t.id}" style="display:none;border-top:1px solid var(--border);padding:14px">
+          <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Fields</div>
+          <div id="sa-fields-inline-${t.id}" style="margin-bottom:10px"><div style="color:var(--text3);font-size:12px">Loading…</div></div>
+          <div style="display:grid;grid-template-columns:2fr 1fr auto;gap:6px;margin-bottom:16px">
+            <input id="sa-fl-${t.id}" placeholder="Field label *" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-size:12px;outline:none">
+            <select id="sa-ft-${t.id}" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:7px 8px;color:var(--text);font-size:12px;outline:none">
+              <option value="text">Text</option>
+              <option value="number">Number</option>
+              <option value="checkbox">Checkbox</option>
+            </select>
+            <button class="btn btn-ghost btn-sm" onclick="saAddFieldInline(${t.id})">＋ Add</button>
+          </div>
+          <div style="background:var(--surface2);border-radius:8px;padding:12px;margin-bottom:10px">
+            <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">📝 Fill &amp; Submit</div>
+            <div id="sa-fill-inline-${t.id}"><div style="color:var(--text3);font-size:12px">Loading…</div></div>
+            <div style="display:flex;gap:8px;margin-top:10px;align-items:center">
+              <button class="btn btn-primary btn-sm" onclick="saSubmitInline(${t.id})">Submit</button>
+              <span class="save-status" id="sa-fill-st-${t.id}"></span>
+            </div>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;margin-bottom:6px" onclick="saToggleHistory(${t.id})">
+            <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.05em">📊 History</div>
+            <span id="sa-hist-chevron-${t.id}" style="color:var(--text3);font-size:12px">▼</span>
+          </div>
+          <div id="sa-hist-inline-${t.id}" style="display:none"></div>
         </div>
       </div>`).join('');
   }
@@ -3344,100 +3386,121 @@ async function deleteSaTemplate(tid) {
   loadMgrChecklists();
 }
 
-async function openSaTemplateFields(tid, name) {
-  document.getElementById('sa-fields-title').textContent = `Fields — ${name}`;
-  document.getElementById('sa-fields-tid').value = tid;
-  document.getElementById('sa-field-label').value = '';
-  document.getElementById('sa-field-status').textContent = '';
-  await loadSaFields(tid);
-  document.getElementById('sa-fields-modal').style.display = 'flex';
+async function saToggleTemplate(tid) {
+  const body = document.getElementById(`sa-body-${tid}`);
+  const chev = document.getElementById(`sa-chevron-${tid}`);
+  if (!body) return;
+  const open = body.style.display !== 'none';
+  body.style.display = open ? 'none' : 'block';
+  chev.textContent = open ? '▼' : '▲';
+  if (!open) {
+    saLoadFieldsInline(tid);
+    saLoadFillInline(tid);
+  }
 }
 
-async function loadSaFields(tid) {
-  const fields = await api(`/api/ss/checklists/${tid}/fields`) || [];
-  const el = document.getElementById('sa-fields-list');
-  if (!fields.length) { el.innerHTML = '<div style="color:var(--text3);font-size:13px;padding:8px 0">No fields yet — add one below.</div>'; return; }
-  el.innerHTML = `<table class="data-table" style="font-size:12px"><thead><tr><th>#</th><th>Label</th><th>Type</th></tr></thead><tbody>${
-    fields.map(f => `<tr><td>${f.field_order||'-'}</td><td>${escHtml(f.label)}</td><td style="color:var(--text3)">${f.field_type||'text'}</td></tr>`).join('')
+async function saLoadFieldsInline(tid) {
+  const el = document.getElementById(`sa-fields-inline-${tid}`);
+  if (!el) return;
+  const res = await api(`/api/ss/checklists/${tid}/fields`) || {};
+  const fields = res.fields || [];
+  if (!fields.length) {
+    el.innerHTML = '<div style="color:var(--text3);font-size:12px;padding:4px 0">No fields yet — add one below.</div>';
+    return;
+  }
+  el.innerHTML = `<table class="data-table" style="font-size:12px"><thead><tr><th>#</th><th>Label</th><th>Type</th><th></th></tr></thead><tbody>${
+    fields.map(f => `<tr>
+      <td>${f.sort_order||'-'}</td>
+      <td>${escHtml(f.label)}</td>
+      <td style="color:var(--text3)">${f.field_type||'text'}</td>
+      <td><button class="btn btn-ghost btn-xs" style="color:var(--red);padding:2px 6px" onclick="saDeleteFieldInline(${f.id},${tid})">✕</button></td>
+    </tr>`).join('')
   }</tbody></table>`;
 }
 
-async function addSaField() {
-  const tid = document.getElementById('sa-fields-tid').value;
-  const label = document.getElementById('sa-field-label').value.trim();
-  const type = document.getElementById('sa-field-type').value;
-  const st = document.getElementById('sa-field-status');
-  if (!label) { st.textContent = 'Label required'; st.style.color = 'var(--red)'; return; }
+async function saAddFieldInline(tid) {
+  const labelEl = document.getElementById(`sa-fl-${tid}`);
+  const label = labelEl?.value.trim() || '';
+  const type = document.getElementById(`sa-ft-${tid}`)?.value || 'text';
+  if (!label) { showToast('Label required', 'amber'); return; }
   const r = await api(`/api/ss/checklists/${tid}/fields`, 'POST', { label, field_type: type });
   if (r && r.status === 'ok') {
-    document.getElementById('sa-field-label').value = '';
-    st.textContent = 'Added'; st.style.color = 'var(--green)';
-    loadSaFields(tid);
-    setTimeout(() => { st.textContent = ''; }, 2000);
+    labelEl.value = '';
+    saLoadFieldsInline(tid);
+    saLoadFillInline(tid);
   } else {
-    st.textContent = 'Failed'; st.style.color = 'var(--red)';
+    showToast('Failed to add field', 'red');
   }
 }
 
-async function openSaChecklistFill(tid, name) {
-  const fields = await api(`/api/ss/checklists/${tid}/fields`) || [];
-  if (!fields.length) { showToast('No fields in this template — add fields first.', 'amber'); return; }
-  document.getElementById('sa-fill-title').textContent = `Fill — ${name}`;
-  document.getElementById('sa-fill-tid').value = tid;
-  document.getElementById('sa-fill-status').textContent = '';
-  const container = document.getElementById('sa-fill-fields');
-  container.innerHTML = fields.map(f => `
+async function saDeleteFieldInline(fid, tid) {
+  await api(`/api/ss/checklists/fields/${fid}`, 'DELETE');
+  saLoadFieldsInline(tid);
+  saLoadFillInline(tid);
+}
+
+async function saLoadFillInline(tid) {
+  const el = document.getElementById(`sa-fill-inline-${tid}`);
+  if (!el) return;
+  const res = await api(`/api/ss/checklists/${tid}/fields`) || {};
+  const fields = res.fields || [];
+  if (!fields.length) {
+    el.innerHTML = '<div style="color:var(--text3);font-size:12px">Add fields above to enable fill.</div>';
+    return;
+  }
+  el.innerHTML = fields.map(f => `
     <div class="form-row">
       <label>${escHtml(f.label)}</label>
       ${f.field_type === 'checkbox'
-        ? `<input type="checkbox" id="sa-fill-f-${f.id}" style="width:20px;height:20px;cursor:pointer">`
-        : `<input id="sa-fill-f-${f.id}" placeholder="${escHtml(f.label)}">`
+        ? `<input type="checkbox" id="sa-fi-${tid}-${f.id}" data-key="${escHtml(f.field_key||f.label)}" style="width:20px;height:20px;cursor:pointer">`
+        : `<input id="sa-fi-${tid}-${f.id}" data-key="${escHtml(f.field_key||f.label)}" placeholder="${escHtml(f.label)}" style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-size:13px;outline:none;width:100%;box-sizing:border-box">`
       }
     </div>`).join('');
-  document.getElementById('sa-fill-modal').style.display = 'flex';
 }
 
-async function submitSaChecklist() {
-  const tid = document.getElementById('sa-fill-tid').value;
-  const inputs = document.querySelectorAll('#sa-fill-fields input');
-  const answers = {};
+async function saSubmitInline(tid) {
+  const st = document.getElementById(`sa-fill-st-${tid}`);
+  const inputs = document.querySelectorAll(`[id^="sa-fi-${tid}-"]`);
+  if (!inputs.length) { showToast('Add fields first', 'amber'); return; }
+  const values = {};
   inputs.forEach(inp => {
-    const fid = inp.id.replace('sa-fill-f-', '');
-    answers[fid] = inp.type === 'checkbox' ? (inp.checked ? 'Yes' : 'No') : inp.value;
+    values[inp.dataset.key] = inp.type === 'checkbox' ? (inp.checked ? 'Yes' : 'No') : inp.value;
   });
   const r = await api(`/api/ss/checklists/${tid}/submit`, 'POST', {
-    submitted_by: session.user.id,
     submitted_by_name: session.user.name,
-    answers
+    values
   });
   if (r && r.status === 'ok') {
-    document.getElementById('sa-fill-modal').style.display = 'none';
-    showToast('Checklist submitted!', 'green');
+    st.textContent = '✓ Submitted'; st.style.color = 'var(--green)';
+    inputs.forEach(inp => { if (inp.type === 'checkbox') inp.checked = false; else inp.value = ''; });
+    setTimeout(() => { st.textContent = ''; }, 3000);
+    const histEl = document.getElementById(`sa-hist-inline-${tid}`);
+    if (histEl && histEl.style.display !== 'none') saLoadHistoryInline(tid);
   } else {
-    document.getElementById('sa-fill-status').textContent = 'Submit failed';
-    document.getElementById('sa-fill-status').style.color = 'var(--red)';
+    st.textContent = 'Submit failed'; st.style.color = 'var(--red)';
   }
 }
 
-async function openSaChecklistHistory(tid, name) {
-  document.getElementById('sa-hist-title').textContent = `History — ${name}`;
+async function saToggleHistory(tid) {
+  const el = document.getElementById(`sa-hist-inline-${tid}`);
+  const chev = document.getElementById(`sa-hist-chevron-${tid}`);
+  if (!el) return;
+  const open = el.style.display !== 'none';
+  el.style.display = open ? 'none' : 'block';
+  chev.textContent = open ? '▼' : '▲';
+  if (!open) saLoadHistoryInline(tid);
+}
+
+async function saLoadHistoryInline(tid) {
+  const el = document.getElementById(`sa-hist-inline-${tid}`);
+  if (!el) return;
   const subs = await api(`/api/ss/checklists/${tid}/history`) || [];
-  const el = document.getElementById('sa-hist-list');
-  if (!subs.length) {
-    el.innerHTML = '<div class="empty-state">No submissions yet.</div>';
-  } else {
-    el.innerHTML = subs.map(s => {
-      const ans = s.answers || {};
-      const ansHtml = Object.entries(ans).map(([k,v]) =>
-        `<div style="margin-top:3px"><span style="color:var(--text3)">${escHtml(String(k))}:</span> ${escHtml(String(v))}</div>`
-      ).join('');
-      return `<div class="card" style="margin-bottom:8px;padding:10px">
-        <div style="font-size:12px;color:var(--text3)">${(s.submitted_at||'').slice(0,16)} · ${escHtml(s.submitted_by_name||'—')}</div>
-        ${ansHtml ? `<div style="margin-top:6px;font-size:12px">${ansHtml}</div>` : ''}
-      </div>`;
-    }).join('');
-  }
-  document.getElementById('sa-hist-modal').style.display = 'flex';
+  if (!subs.length) { el.innerHTML = '<div class="empty-state">No submissions yet.</div>'; return; }
+  el.innerHTML = subs.map(s => `
+    <div class="card" style="margin-bottom:8px;padding:10px">
+      <div style="font-size:12px;color:var(--text3)">${(s.submitted_at||s.submission_date||'').slice(0,16)} · ${escHtml(s.submitted_by_name||'—')}</div>
+      ${s.notes ? `<div style="margin-top:4px;font-size:12px">${escHtml(s.notes)}</div>` : ''}
+    </div>`).join('');
 }
 
 function toggleMgrAddUser() {
@@ -6187,54 +6250,6 @@ async function loadPickerLowStock() {
   <!-- popups are appended here dynamically; pointer-events set to auto per-popup -->
 </div>
 
-<!-- ── Sawshop Admin: Template Fields Modal ── -->
-<div id="sa-fields-modal" class="modal-overlay" style="display:none">
-  <div class="modal" style="max-width:500px">
-    <div style="font-size:15px;font-weight:700;color:var(--text);margin-bottom:14px" id="sa-fields-title">Fields</div>
-    <input type="hidden" id="sa-fields-tid">
-    <div id="sa-fields-list" style="margin-bottom:14px"></div>
-    <div style="display:grid;grid-template-columns:2fr 1fr auto;gap:8px;align-items:end;margin-bottom:8px">
-      <input id="sa-field-label" placeholder="Field label *" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-size:13px;outline:none">
-      <select id="sa-field-type" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:7px 8px;color:var(--text);font-size:13px;outline:none">
-        <option value="text">Text</option>
-        <option value="number">Number</option>
-        <option value="checkbox">Checkbox</option>
-        <option value="date">Date</option>
-      </select>
-      <button class="btn btn-primary btn-sm" onclick="addSaField()">Add</button>
-    </div>
-    <span class="save-status" id="sa-field-status"></span>
-    <div style="margin-top:14px">
-      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('sa-fields-modal').style.display='none'">Close</button>
-    </div>
-  </div>
-</div>
-
-<!-- ── Sawshop Admin: Fill Checklist Modal ── -->
-<div id="sa-fill-modal" class="modal-overlay" style="display:none">
-  <div class="modal" style="max-width:480px">
-    <div style="font-size:15px;font-weight:700;color:var(--text);margin-bottom:14px" id="sa-fill-title">Fill Checklist</div>
-    <input type="hidden" id="sa-fill-tid">
-    <div id="sa-fill-fields" style="max-height:380px;overflow-y:auto"></div>
-    <span class="save-status" id="sa-fill-status" style="display:block;margin-top:8px"></span>
-    <div style="display:flex;gap:8px;margin-top:14px">
-      <button class="btn btn-primary btn-sm" onclick="submitSaChecklist()">Submit</button>
-      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('sa-fill-modal').style.display='none'">Cancel</button>
-    </div>
-  </div>
-</div>
-
-<!-- ── Sawshop Admin: Submission History Modal ── -->
-<div id="sa-hist-modal" class="modal-overlay" style="display:none">
-  <div class="modal" style="max-width:520px">
-    <div style="font-size:15px;font-weight:700;color:var(--text);margin-bottom:14px" id="sa-hist-title">Submission History</div>
-    <div id="sa-hist-list" style="max-height:420px;overflow-y:auto"></div>
-    <div style="margin-top:14px">
-      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('sa-hist-modal').style.display='none'">Close</button>
-    </div>
-  </div>
-</div>
-
 <!-- =================== STORE PICKER ==================== -->
 <div id="store-picker" class="screen">
   <div class="topbar">
@@ -6906,9 +6921,7 @@ function getPmSection(name) {
 
 // ── Admin: list all templates (operational forms + PM checklists) ──
 async function loadAdminChecklists() {
-  // Operational forms — exclude sawshop (Stefan manages those)
-  const allTmpls = await api('/api/checklists') || [];
-  const tmpls = allTmpls.filter(t => !(t.target_roles || []).includes('sawshop'));
+  const tmpls = await api('/api/checklists') || [];
   const el = document.getElementById('ad-checklist-list');
   if (!tmpls.length) {
     el.innerHTML = '<div class="empty-state">No operational forms yet. Click "+ New Form" to create one.</div>';
@@ -7325,7 +7338,7 @@ async function openSsJobModal() {
   document.getElementById('ss-job-status').textContent = '';
 
   // Populate sawshop artisans
-  const users = await api('/api/users/by-role/sawshop') || [];
+  const users = await api('/api/users/by-role/artisan') || [];
   const aSel = document.getElementById('ss-job-artisan');
   aSel.innerHTML = '<option value="">— assign later —</option>' +
     users.map(u => `<option value="${u.id}" data-name="${escHtml(u.name)}">${escHtml(u.name)}</option>`).join('');
@@ -7400,7 +7413,7 @@ async function reopenSsJob(bid) {
 async function openSsAssignModal(bid, currentName, currentId) {
   document.getElementById('ss-assign-bid').value = bid;
   document.getElementById('ss-assign-status').textContent = '';
-  const users = await api('/api/users/by-role/sawshop') || [];
+  const users = await api('/api/users/by-role/artisan') || [];
   const aSel = document.getElementById('ss-assign-artisan');
   aSel.innerHTML = '<option value="">Select artisan...</option>' +
     users.map(u => `<option value="${u.id}" data-name="${escHtml(u.name)}" ${u.id==currentId?'selected':''}>${escHtml(u.name)}</option>`).join('');
@@ -7436,7 +7449,7 @@ async function openSsTimelogModal(bid, machineName) {
   document.getElementById('ss-timelog-date').value = new Date().toISOString().split('T')[0];
 
   // Populate artisans
-  const users = await api('/api/users/by-role/sawshop') || [];
+  const users = await api('/api/users/by-role/artisan') || [];
   const aSel = document.getElementById('ss-timelog-artisan');
   aSel.innerHTML = '<option value="">Select artisan...</option>' +
     users.map(u => `<option value="${u.id}" data-name="${escHtml(u.name)}">${escHtml(u.name)}</option>`).join('');
@@ -7550,6 +7563,58 @@ async function saveArtSsTimeLog() {
     loadArtSsJobs();
   } else {
     st.textContent = 'Failed'; st.style.color = 'var(--red)';
+  }
+}
+
+// ── Team Leader SS Queue ─────────────────────────────────────
+
+async function loadSsManageQueue() {
+  const el = document.getElementById('art-ss-manage-list');
+  if (!el) return;
+  el.innerHTML = '<div style="color:var(--text3);font-size:13px">Loading…</div>';
+  const [jobs, users] = await Promise.all([
+    api('/api/ss/breakdowns?status=open,in_progress'),
+    api('/api/users/by-role/artisan')
+  ]);
+  if (!jobs || !jobs.length) {
+    el.innerHTML = '<div class="empty-state">No open sawshop breakdowns.</div>';
+    return;
+  }
+  const artisanOpts = '<option value="">— Assign artisan —</option>' +
+    (users||[]).map(u => `<option value="${u.id}" data-name="${escHtml(u.name)}">${escHtml(u.name)}</option>`).join('');
+  el.innerHTML = jobs.map(j => {
+    const borderColor = j.status === 'open' ? 'var(--red)' : 'var(--amber)';
+    return `
+      <div class="card" style="margin-bottom:10px;border-left:3px solid ${borderColor}">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
+          <div>
+            <div style="font-weight:700;color:var(--text);font-size:14px">${escHtml(j.machine_name||'Unknown machine')}</div>
+            <div style="font-size:12px;color:var(--text3);margin-top:2px">${(j.logged_at||'').slice(0,16)} · Logged by ${escHtml(j.logged_by_name||'—')}</div>
+          </div>
+          <span style="font-size:11px;font-weight:700;color:${borderColor};text-transform:uppercase;flex-shrink:0;margin-left:8px">${j.status}</span>
+        </div>
+        ${j.description ? `<div style="font-size:13px;color:var(--text2);margin-bottom:10px">${escHtml(j.description)}</div>` : ''}
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <select onchange="ssTlAssign(${j.id},this)" style="flex:1;min-width:160px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-size:12px;outline:none">
+            ${artisanOpts.replace(`value="${j.assigned_to}"`, `value="${j.assigned_to}" selected`)}
+          </select>
+          ${j.status !== 'closed' ? `<button class="btn btn-success btn-xs" onclick="openSsCloseModal(${j.id})">✓ Close</button>` : ''}
+        </div>
+        ${j.assigned_name ? `<div style="font-size:11px;color:var(--text3);margin-top:6px">Assigned: ${escHtml(j.assigned_name)}</div>` : ''}
+      </div>`;
+  }).join('');
+}
+
+async function ssTlAssign(bid, sel) {
+  const uid = parseInt(sel.value);
+  if (!uid) return;
+  const uname = sel.options[sel.selectedIndex]?.dataset?.name || sel.options[sel.selectedIndex]?.text || '';
+  const r = await api(`/api/ss/breakdowns/${bid}`, 'PUT', { action: 'assign', assigned_to: uid, assigned_name: uname });
+  if (r && r.status === 'ok') {
+    showToast(`Assigned to ${uname}`, 'green');
+  } else {
+    showToast('Assignment failed', 'red');
+    loadSsManageQueue();
   }
 }
 

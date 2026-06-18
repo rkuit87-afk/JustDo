@@ -1162,10 +1162,10 @@ def _run_migrations():
             existing = conn.execute("SELECT id FROM form_templates WHERE name='Boiler Daily Log'").fetchone()
             if not existing:
                 cur = conn.execute(
-                    "INSERT INTO form_templates (name, description, target_roles) VALUES (?,?,?)",
+                    "INSERT INTO form_templates (name, description, target_roles, scope) VALUES (?,?,?,?)",
                     ("Boiler Daily Log",
                      "Daily boiler operations — TDS readings, condensate & makeup water, salt/softener, lost time.",
-                     '["sawshop","admin"]')
+                     '["admin","supervisor"]', 'mill')
                 )
                 tid = cur.lastrowid
                 fields = [
