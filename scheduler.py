@@ -34,7 +34,8 @@ def _due_this_week(sched, week_start_date):
     try:
         last_date = date.fromisoformat(last)
         return (week_start_date - last_date).days >= (min_weeks * 7)
-    except Exception:
+    except (ValueError, TypeError) as e:
+        logger.warning(f"Invalid last_generated date '{last}' for schedule {sched.get('id', '?')}: {e}")
         return True
 
 def generate_weekly_tasks():

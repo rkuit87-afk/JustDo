@@ -122,7 +122,7 @@ def generate_template_report(year, month):
                 parts = str(t).split(':')
                 h, m = int(parts[0]), int(parts[1])
                 return (h * 60 + m) / 1440
-            except:
+            except (ValueError, TypeError, IndexError):
                 return None
 
         # Template columns:
