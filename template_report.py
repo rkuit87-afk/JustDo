@@ -17,6 +17,7 @@ import shutil
 from datetime import date, timedelta, datetime
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
+from utils import time_str_to_excel
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -115,16 +116,6 @@ def generate_template_report(year, month):
         compound = b['compound_id'] or _get_compound_id(
             b['equipment_id'], b['equip_name'], by_id, by_name)
 
-        # Format times as fractions of day (Excel time format)
-        def time_to_excel(t):
-            if not t: return None
-            try:
-                parts = str(t).split(':')
-                h, m = int(parts[0]), int(parts[1])
-                return (h * 60 + m) / 1440
-            except:
-                return None
-
         # Template columns:
         # A=Date, B=Dept, C=Equipment ID, D=Equipment Name, E=Description,
         # F=Start, G=End, I=Failure Type, K=Component, L=Failure Mode, Q=Comments
@@ -135,9 +126,9 @@ def generate_template_report(year, month):
         ws_dd.cell(row=row, column=4).value  = b['equip_name'] or compound.split(' - ')[-1]
         ws_dd.cell(row=row, column=5).value  = (b['art_description'] or
                                                  b['sup_notes'] or '')
-        ws_dd.cell(row=row, column=6).value  = time_to_excel(b['sup_time_start'])
+        ws_dd.cell(row=row, column=6).value  = time_str_to_excel(b['sup_time_start'])
         ws_dd.cell(row=row, column=6).number_format = 'HH:MM'
-        ws_dd.cell(row=row, column=7).value  = time_to_excel(
+        ws_dd.cell(row=row, column=7).value  = time_str_to_excel(
             b['art_time_end'] or b['sup_time_end'])
         ws_dd.cell(row=row, column=7).number_format = 'HH:MM'
         ws_dd.cell(row=row, column=9).value  = (b['final_failure_type'] or

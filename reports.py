@@ -13,6 +13,7 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 from database import get_db
 from scheduler import get_week_start
+from utils import write_header_row, write_data_row, group_readings_by_date
 
 try:
     from config import ARCHIVE_MONTHS, SITE_NAME
@@ -129,11 +130,8 @@ def generate_weekly_report(week_start=None):
     bd_headers = ['Equipment', 'Area / Section', 'Failure Count',
                   'Downtime (hrs)', 'Downtime (min)', 'Maint. Down (min)',
                   'Prod. Down (min)', 'Failure Type', 'Components']
-    for i, h in enumerate(bd_headers, 1):
-        ws.cell(row=row, column=i, value=h)
-    style_header(ws, row, len(bd_headers))
-    ws.row_dimensions[row].height = 30
-    row += 1
+    row = write_header_row(ws, row, bd_headers, style_header)
+    ws.row_dimensions[row - 1].height = 30
 
     bds = c.execute("""
         SELECT e.name as equip_name, e.area, e.section,
@@ -165,10 +163,7 @@ def generate_weekly_report(week_start=None):
             bd['ftypes'] or '',
             bd['components'] or ''
         ]
-        for i, v in enumerate(vals, 1):
-            ws.cell(row=row, column=i, value=v)
-        style_row(ws, row, len(bd_headers), fill)
-        row += 1
+        row = write_data_row(ws, row, vals, len(bd_headers), fill, style_row)
 
     # Total row
     ws.cell(row=row, column=1, value='TOTAL').font = Font(bold=True)
@@ -183,10 +178,7 @@ def generate_weekly_report(week_start=None):
     row += 1
 
     pm_hdr = ['Artisan', 'Scheduled', 'Completed', 'Missed', 'Compliance %']
-    for i, h in enumerate(pm_hdr, 1):
-        ws.cell(row=row, column=i, value=h)
-    style_header(ws, row, len(pm_hdr))
-    row += 1
+    row = write_header_row(ws, row, pm_hdr, style_header)
 
     compliance = c.execute("""
         SELECT u.name, COUNT(*) as total,
@@ -201,10 +193,7 @@ def generate_weekly_report(week_start=None):
         pct  = round((pm['done']/pm['total']*100) if pm['total'] else 0, 1)
         fill = GRN_FILL if pct >= 90 else YLW_FILL if pct >= 70 else RED_FILL
         vals = [pm['name'], pm['total'], pm['done'], pm['missed'] or 0, f"{pct}%"]
-        for i, v in enumerate(vals, 1):
-            ws.cell(row=row, column=i, value=v)
-        style_row(ws, row, len(pm_hdr), fill)
-        row += 1
+        row = write_data_row(ws, row, vals, len(pm_hdr), fill, style_row)
 
     set_col_widths(ws, [32, 18, 12, 12, 12, 14, 14, 18, 30])
 
@@ -225,11 +214,8 @@ def generate_weekly_report(week_start=None):
         'Equip ID (Prod)', 'Repair Time', 'Comments'
     ]
     row = 4
-    for i, h in enumerate(dl_headers, 1):
-        ws2.cell(row=row, column=i, value=h)
-    style_header(ws2, row, len(dl_headers))
-    ws2.row_dimensions[row].height = 30
-    row += 1
+    row = write_header_row(ws2, row, dl_headers, style_header)
+    ws2.row_dimensions[row - 1].height = 30
 
     bds_detail = c.execute("""
         SELECT b.*, e.name as equip_name, e.area, e.equipment_id as equip_code,
@@ -299,10 +285,7 @@ def generate_weekly_report(week_start=None):
                    'Component', 'Failure Mode', 'Description', 'Repair Action',
                    'Machine Status', 'Follow-up', 'Parts Used', 'Status', 'Disputed']
     row = 4
-    for i, h in enumerate(bd3_headers, 1):
-        ws3.cell(row=row, column=i, value=h)
-    style_header(ws3, row, len(bd3_headers))
-    row += 1
+    row = write_header_row(ws3, row, bd3_headers, style_header)
 
     for bd in bds_detail:
         fill = RED_FILL if (bd['downtime_mins'] or 0) > 120 else None
@@ -319,10 +302,7 @@ def generate_weekly_report(week_start=None):
             bd['art_followup'], bd['parts_list'],
             bd['status'], 'Yes' if bd['disputed'] else 'No'
         ]
-        for i, v in enumerate(vals, 1):
-            ws3.cell(row=row, column=i, value=v or '')
-        style_row(ws3, row, len(bd3_headers), fill)
-        row += 1
+        row = write_data_row(ws3, row, vals, len(bd3_headers), fill, style_row)
 
     set_col_widths(ws3, [16,30,10,16,16,7,7,12,16,18,16,35,25,25,10,30,12,8])
 
@@ -335,10 +315,7 @@ def generate_weekly_report(week_start=None):
     pm_headers = ['Artisan', 'Task', 'Equipment', 'Area', 'Shift',
                   'Status', 'Completed At', 'Outcome', 'Condition', 'Notes', 'Parts Used']
     row = 4
-    for i, h in enumerate(pm_headers, 1):
-        ws4.cell(row=row, column=i, value=h)
-    style_header(ws4, row, len(pm_headers))
-    row += 1
+    row = write_header_row(ws4, row, pm_headers, style_header)
 
     pm_tasks = c.execute("""
         SELECT t.*, u.name as artisan_name, e.name as equip_name, e.area,
@@ -362,10 +339,7 @@ def generate_weekly_report(week_start=None):
             t['shift'], t['status'].upper(), t['completed_at'],
             t['outcome'], t['condition_found'], t['notes'], t['parts']
         ]
-        for i, v in enumerate(vals, 1):
-            ws4.cell(row=row, column=i, value=v or '')
-        style_row(ws4, row, len(pm_headers), fill)
-        row += 1
+        row = write_data_row(ws4, row, vals, len(pm_headers), fill, style_row)
 
     set_col_widths(ws4, [16,35,30,10,6,8,16,25,20,30,30])
 
@@ -387,11 +361,8 @@ def generate_weekly_report(week_start=None):
         'Lost Time (min)', 'Downtime Incident', 'Operator Comments'
     ]
     row = 4
-    for i, h in enumerate(bo_headers, 1):
-        ws5.cell(row=row, column=i, value=h)
-    style_header(ws5, row, len(bo_headers))
-    ws5.row_dimensions[row].height = 45
-    row += 1
+    row = write_header_row(ws5, row, bo_headers, style_header)
+    ws5.row_dimensions[row - 1].height = 45
 
     boilers = c.execute("""
         SELECT id, name FROM equipment WHERE area='Boilers' ORDER BY name
@@ -409,11 +380,7 @@ def generate_weekly_report(week_start=None):
         ORDER BY br.log_date, e.name
     """, (since, until)).fetchall()
 
-    # Group by date
-    from collections import defaultdict
-    by_date = defaultdict(dict)
-    for r in readings_raw:
-        by_date[r['log_date']][r['boiler_id']] = dict(r)
+    by_date = group_readings_by_date(readings_raw, id_field='boiler_id')
 
     for log_date in sorted(by_date.keys()):
         day_data = by_date[log_date]
@@ -475,11 +442,8 @@ def generate_weekly_report(week_start=None):
     gen_headers.append('Combined Avg Run Time (hrs)')
 
     row = 4
-    for i, h in enumerate(gen_headers, 1):
-        ws6.cell(row=row, column=i, value=h)
-    style_header(ws6, row, len(gen_headers))
-    ws6.row_dimensions[row].height = 45
-    row += 1
+    row = write_header_row(ws6, row, gen_headers, style_header)
+    ws6.row_dimensions[row - 1].height = 45
 
     gen_readings = c.execute("""
         SELECT ur.*, e.name as equip_name
@@ -489,9 +453,7 @@ def generate_weekly_report(week_start=None):
         ORDER BY ur.log_date, e.name
     """, (since, until)).fetchall()
 
-    by_date_gen = defaultdict(dict)
-    for r in gen_readings:
-        by_date_gen[r['log_date']][r['equipment_id']] = dict(r)
+    by_date_gen = group_readings_by_date(gen_readings, id_field='equipment_id')
 
     for log_date in sorted(by_date_gen.keys()):
         day_data = by_date_gen[log_date]
@@ -531,11 +493,8 @@ def generate_weekly_report(week_start=None):
         comp_headers += [f"{comp['name']} - Hour Meter", f"{comp['name']} - Run Hrs"]
 
     row = 4
-    for i, h in enumerate(comp_headers, 1):
-        ws7.cell(row=row, column=i, value=h)
-    style_header(ws7, row, len(comp_headers))
-    ws7.row_dimensions[row].height = 45
-    row += 1
+    row = write_header_row(ws7, row, comp_headers, style_header)
+    ws7.row_dimensions[row - 1].height = 45
 
     comp_readings = c.execute("""
         SELECT ur.*, e.name as equip_name
@@ -545,9 +504,7 @@ def generate_weekly_report(week_start=None):
         ORDER BY ur.log_date, e.name
     """, (since, until)).fetchall()
 
-    by_date_comp = defaultdict(dict)
-    for r in comp_readings:
-        by_date_comp[r['log_date']][r['equipment_id']] = dict(r)
+    by_date_comp = group_readings_by_date(comp_readings, id_field='equipment_id')
 
     for log_date in sorted(by_date_comp.keys()):
         day_data = by_date_comp[log_date]
@@ -572,10 +529,7 @@ def generate_weekly_report(week_start=None):
 
     ro_headers = ['Part Description', 'Qty', 'Source', 'Date Logged']
     row = 4
-    for i, h in enumerate(ro_headers, 1):
-        ws8.cell(row=row, column=i, value=h)
-    style_header(ws8, row, len(ro_headers))
-    row += 1
+    row = write_header_row(ws8, row, ro_headers, style_header)
 
     reorder = c.execute("""
         SELECT part_desc, SUM(qty) as qty,
@@ -627,10 +581,7 @@ def generate_monthly_archive(year, month):
                'Description', 'Repair Action', 'Machine Status', 'Parts Used',
                'Status', 'Disputed', 'Resolution Note']
     row = 4
-    for i, h in enumerate(headers, 1):
-        ws.cell(row=row, column=i, value=h)
-    style_header(ws, row, len(headers))
-    row += 1
+    row = write_header_row(ws, row, headers, style_header)
 
     bds = c.execute("""
         SELECT b.log_date, e.name, e.area, e.section, ua.name as artisan,
@@ -672,10 +623,7 @@ def generate_monthly_archive(year, month):
         'Lost Time (min)', 'Downtime Incident', 'Comments'
     ]
     row = 4
-    for i, h in enumerate(bo_hdr, 1):
-        ws2.cell(row=row, column=i, value=h)
-    style_header(ws2, row, len(bo_hdr))
-    row += 1
+    row = write_header_row(ws2, row, bo_hdr, style_header)
 
     boilers = c.execute(
         "SELECT id FROM equipment WHERE area='Boilers' ORDER BY name"
@@ -688,10 +636,7 @@ def generate_monthly_archive(year, month):
         ORDER BY br.log_date, br.boiler_id
     """, (start, end)).fetchall()
 
-    from collections import defaultdict
-    by_date = defaultdict(dict)
-    for r in readings_raw:
-        by_date[r['log_date']][r['boiler_id']] = dict(r)
+    by_date = group_readings_by_date(readings_raw, id_field='boiler_id')
 
     for log_date in sorted(by_date.keys()):
         day_data = by_date[log_date]
@@ -732,10 +677,7 @@ def generate_monthly_archive(year, month):
         gen_hdr += [f"{g['name']} - Hour Meter", f"{g['name']} - Run Hrs", f"{g['name']} - Diesel (L)"]
 
     row = 4
-    for i, h in enumerate(gen_hdr, 1):
-        ws3.cell(row=row, column=i, value=h)
-    style_header(ws3, row, len(gen_hdr))
-    row += 1
+    row = write_header_row(ws3, row, gen_hdr, style_header)
 
     gen_readings = c.execute("""
         SELECT ur.* FROM utility_readings ur
@@ -744,9 +686,7 @@ def generate_monthly_archive(year, month):
         ORDER BY ur.log_date, e.name
     """, (start, end)).fetchall()
 
-    by_date_g = defaultdict(dict)
-    for r in gen_readings:
-        by_date_g[r['log_date']][r['equipment_id']] = dict(r)
+    by_date_g = group_readings_by_date(gen_readings, id_field='equipment_id')
 
     for log_date in sorted(by_date_g.keys()):
         day_data = by_date_g[log_date]
@@ -773,10 +713,7 @@ def generate_monthly_archive(year, month):
         comp_hdr += [f"{comp['name']} - Hour Meter", f"{comp['name']} - Run Hrs"]
 
     row = 4
-    for i, h in enumerate(comp_hdr, 1):
-        ws4.cell(row=row, column=i, value=h)
-    style_header(ws4, row, len(comp_hdr))
-    row += 1
+    row = write_header_row(ws4, row, comp_hdr, style_header)
 
     comp_readings = c.execute("""
         SELECT ur.* FROM utility_readings ur
@@ -785,9 +722,7 @@ def generate_monthly_archive(year, month):
         ORDER BY ur.log_date, e.name
     """, (start, end)).fetchall()
 
-    by_date_c = defaultdict(dict)
-    for r in comp_readings:
-        by_date_c[r['log_date']][r['equipment_id']] = dict(r)
+    by_date_c = group_readings_by_date(comp_readings, id_field='equipment_id')
 
     for log_date in sorted(by_date_c.keys()):
         day_data = by_date_c[log_date]
@@ -809,10 +744,7 @@ def generate_monthly_archive(year, month):
     pm_hdr = ['Week Start', 'Artisan', 'Task', 'Equipment', 'Area',
               'Status', 'Completed At', 'Outcome', 'Condition', 'Parts Used']
     row = 4
-    for i, h in enumerate(pm_hdr, 1):
-        ws5.cell(row=row, column=i, value=h)
-    style_header(ws5, row, len(pm_hdr))
-    row += 1
+    row = write_header_row(ws5, row, pm_hdr, style_header)
 
     tasks = c.execute("""
         SELECT t.week_start, u.name, t.title, e.name as equip, e.area,

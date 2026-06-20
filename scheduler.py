@@ -5,6 +5,7 @@ scheduler.py - Improved version with error handling and logging
 import logging
 from datetime import date, timedelta
 from database import get_db_context
+from utils import record_parts_and_reorder
 
 logger = logging.getLogger(__name__)
 
@@ -181,21 +182,7 @@ def mark_task_done(task_id, completed_by, outcome, condition, notes, parts, chec
                     logger.warning(f"Failed to update checklist item {item_id}: {e}")
             
             # Add parts used
-            for p in parts:
-                if p.get('desc'):
-                    try:
-                        conn.execute(
-                            "INSERT INTO pm_parts (task_id, part_desc, qty) VALUES (?,?,?)",
-                            (task_id, p['desc'], p.get('qty', 1))
-                        )
-                        
-                        # Add to reorder list
-                        conn.execute(
-                            "INSERT INTO reorder (part_desc, qty, source) VALUES (?,?,?)",
-                            (p['desc'], p.get('qty', 1), f'PM Task #{task_id}')
-                        )
-                    except Exception as e:
-                        logger.warning(f"Failed to record part {p.get('desc')}: {e}")
+            record_parts_and_reorder(conn, parts, 'pm', task_id)
             
             conn.commit()
             logger.info(f"Task {task_id} marked as done successfully")
