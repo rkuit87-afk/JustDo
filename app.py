@@ -550,8 +550,8 @@ def complete_task(task_id):
                         "UPDATE pm_checklist_items SET checked=? WHERE id=?",
                         (1 if checked else 0, int(item_id))
                     )
-                except (ValueError, TypeError):
-                    pass
+                except (ValueError, TypeError) as e:
+                    logger.debug(f"Skipped checklist item {item_id}: {e}")
             # parts used -> reorder
             for p in (d.get('parts', []) or []):
                 if p.get('desc'):
@@ -647,7 +647,7 @@ def get_suspended_tasks():
         return jsonify([dict(r) for r in rows])
     except Exception as e:
         logger.error(f"Error fetching suspended tasks: {e}", exc_info=True)
-        return jsonify([]), 500
+        return jsonify({'status': 'error', 'message': 'Failed to fetch suspended tasks'}), 500
 
 
 @app.route('/api/tasks/history/<int:user_id>')
@@ -665,7 +665,7 @@ def get_task_history(user_id):
         return jsonify([dict(r) for r in rows])
     except Exception as e:
         logger.error(f"Error fetching task history: {e}", exc_info=True)
-        return jsonify([]), 500
+        return jsonify({'status': 'error', 'message': 'Failed to fetch task history'}), 500
 
 
 # ============================================================
@@ -677,7 +677,8 @@ def _recalc_downtime(b):
         try:
             h, m = str(t).split(':')[:2]
             return int(h) * 60 + int(m)
-        except Exception:
+        except (ValueError, TypeError) as e:
+            logger.debug(f"Cannot parse time '{t}': {e}")
             return None
     start = b.get('final_time_start') or b.get('art_time_start') or b.get('sup_time_start')
     end = b.get('final_time_end') or b.get('art_time_end') or b.get('sup_time_end')
@@ -750,7 +751,7 @@ def get_breakdowns():
         return jsonify(result)
     except Exception as e:
         logger.error(f"Error fetching breakdowns: {e}", exc_info=True)
-        return jsonify([]), 500
+        return jsonify({'status': 'error', 'message': 'Failed to fetch breakdowns'}), 500
 
 
 @app.route('/api/breakdowns/supervisor')
@@ -770,7 +771,7 @@ def get_supervisor_breakdowns():
         return jsonify([dict(r) for r in rows])
     except Exception as e:
         logger.error(f"Error fetching supervisor breakdowns: {e}", exc_info=True)
-        return jsonify([]), 500
+        return jsonify({'status': 'error', 'message': 'Failed to fetch supervisor breakdowns'}), 500
 
 
 @app.route('/api/breakdowns/mine/<int:user_id>')
@@ -792,7 +793,7 @@ def get_my_breakdowns(user_id):
         return jsonify([dict(r) for r in rows])
     except Exception as e:
         logger.error(f"Error fetching artisan breakdowns: {e}", exc_info=True)
-        return jsonify([]), 500
+        return jsonify({'status': 'error', 'message': 'Failed to fetch artisan breakdowns'}), 500
 
 
 @app.route('/api/breakdowns/disputed')
@@ -813,7 +814,7 @@ def get_disputed_breakdowns():
         return jsonify([dict(r) for r in rows])
     except Exception as e:
         logger.error(f"Error fetching disputed breakdowns: {e}", exc_info=True)
-        return jsonify([]), 500
+        return jsonify({'status': 'error', 'message': 'Failed to fetch disputed breakdowns'}), 500
 
 
 @app.route('/api/breakdowns/<int:bd_id>/artisan', methods=['POST'])
@@ -971,7 +972,7 @@ def get_job_requests():
         return jsonify([dict(r) for r in rows])
     except Exception as e:
         logger.error(f"Error fetching job requests: {e}", exc_info=True)
-        return jsonify([]), 500
+        return jsonify({'status': 'error', 'message': 'Failed to fetch job requests'}), 500
 
 
 @app.route('/api/jobrequests', methods=['POST'])
@@ -1106,7 +1107,7 @@ def get_activity_log():
         return jsonify([dict(r) for r in rows])
     except Exception as e:
         logger.error(f"Error fetching activity log: {e}", exc_info=True)
-        return jsonify([]), 500
+        return jsonify({'status': 'error', 'message': 'Failed to fetch activity log'}), 500
 
 
 # ============================================================
@@ -1126,7 +1127,7 @@ def get_schedule():
         return jsonify([dict(r) for r in rows])
     except Exception as e:
         logger.error(f"Error fetching schedule: {e}", exc_info=True)
-        return jsonify([]), 500
+        return jsonify({'status': 'error', 'message': 'Failed to fetch schedule'}), 500
 
 
 @app.route('/api/schedule', methods=['POST'])
@@ -1268,7 +1269,7 @@ def boiler_readings():
         return jsonify([dict(r) for r in rows])
     except Exception as e:
         logger.error(f"Error fetching boiler readings: {e}", exc_info=True)
-        return jsonify([]), 500
+        return jsonify({'status': 'error', 'message': 'Failed to fetch boiler readings'}), 500
 
 
 @app.route('/api/readings/utility', methods=['GET', 'POST'])
@@ -1308,7 +1309,7 @@ def utility_readings():
         return jsonify([dict(r) for r in rows])
     except Exception as e:
         logger.error(f"Error fetching utility readings: {e}", exc_info=True)
-        return jsonify([]), 500
+        return jsonify({'status': 'error', 'message': 'Failed to fetch utility readings'}), 500
 
 
 # ============================================================
@@ -1324,7 +1325,7 @@ def get_reorder():
         return jsonify([dict(r) for r in rows])
     except Exception as e:
         logger.error(f"Error fetching reorder list: {e}", exc_info=True)
-        return jsonify([]), 500
+        return jsonify({'status': 'error', 'message': 'Failed to fetch reorder list'}), 500
 
 
 @app.route('/api/reorder', methods=['POST'])
@@ -1393,7 +1394,7 @@ def get_stock():
         return jsonify([dict(r) for r in rows])
     except Exception as e:
         logger.error(f"Error fetching stock: {e}", exc_info=True)
-        return jsonify([]), 500
+        return jsonify({'status': 'error', 'message': 'Failed to fetch stock'}), 500
 
 
 @app.route('/api/stores/stock/add', methods=['POST'])
@@ -1498,7 +1499,7 @@ def get_movements():
         return jsonify([dict(r) for r in rows])
     except Exception as e:
         logger.error(f"Error fetching movements: {e}", exc_info=True)
-        return jsonify([]), 500
+        return jsonify({'status': 'error', 'message': 'Failed to fetch movements'}), 500
 
 
 @app.route('/api/stores/dept-codes')
@@ -1511,7 +1512,7 @@ def get_dept_codes():
         return jsonify([dict(r) for r in rows])
     except Exception as e:
         logger.error(f"Error fetching dept codes: {e}", exc_info=True)
-        return jsonify([]), 500
+        return jsonify({'status': 'error', 'message': 'Failed to fetch dept codes'}), 500
 
 
 @app.route('/api/stores/dept-codes', methods=['POST'])
@@ -1607,7 +1608,7 @@ def get_equipment_spares(equip_id):
         return jsonify([dict(r) for r in rows])
     except Exception as e:
         logger.error(f"Error fetching spares: {e}", exc_info=True)
-        return jsonify([]), 500
+        return jsonify({'status': 'error', 'message': 'Failed to fetch spares'}), 500
 
 
 @app.route('/api/equipment/<int:equip_id>/spares', methods=['POST'])
@@ -1656,7 +1657,7 @@ def get_suppliers():
         return jsonify([dict(r) for r in rows])
     except Exception as e:
         logger.error(f"Error fetching suppliers: {e}", exc_info=True)
-        return jsonify([]), 500
+        return jsonify({'status': 'error', 'message': 'Failed to fetch suppliers'}), 500
 
 
 @app.route('/api/suppliers', methods=['POST'])
@@ -1774,7 +1775,7 @@ def get_areas():
         return jsonify([dict(r) for r in rows])
     except Exception as e:
         logger.error(f"Error fetching areas: {e}", exc_info=True)
-        return jsonify([]), 500
+        return jsonify({'status': 'error', 'message': 'Failed to fetch areas'}), 500
 
 
 @app.route('/api/areas', methods=['POST'])
@@ -1927,7 +1928,7 @@ def get_inactive_equipment():
         return jsonify([dict(r) for r in rows])
     except Exception as e:
         logger.error(f"Error fetching inactive equipment: {e}", exc_info=True)
-        return jsonify([]), 500
+        return jsonify({'status': 'error', 'message': 'Failed to fetch inactive equipment'}), 500
 
 
 # ============================================================
@@ -2020,7 +2021,7 @@ def get_breakdowns_pending_review(user_id):
         return jsonify([dict(r) for r in rows])
     except Exception as e:
         logger.error(f"Error fetching pending review breakdowns: {e}", exc_info=True)
-        return jsonify([]), 500
+        return jsonify({'status': 'error', 'message': 'Failed to fetch pending review breakdowns'}), 500
 
 
 @app.route('/api/breakdowns/<int:bd_id>/artisan-review', methods=['POST'])
@@ -2058,7 +2059,8 @@ def artisan_review_breakdown(bd_id):
                 try:
                     h, m = str(t).split(':')[:2]
                     return int(h)*60 + int(m)
-                except Exception:
+                except (ValueError, TypeError) as e:
+                    logger.debug(f"Cannot parse time '{t}': {e}")
                     return None
 
             start_m = to_mins(art_start or sup_start)
@@ -2136,7 +2138,7 @@ def get_supervisor_active_breakdowns(supervisor_id):
         return jsonify([dict(r) for r in rows])
     except Exception as e:
         logger.error(f"Error fetching supervisor active breakdowns: {e}", exc_info=True)
-        return jsonify([]), 500
+        return jsonify({'status': 'error', 'message': 'Failed to fetch supervisor active breakdowns'}), 500
 
 
 # ============================================================
@@ -2330,7 +2332,7 @@ def get_requisitions():
         return jsonify([dict(r) for r in rows])
     except Exception as e:
         logger.error(f"Error fetching requisitions: {e}", exc_info=True)
-        return jsonify([]), 500
+        return jsonify({'status': 'error', 'message': 'Failed to fetch requisitions'}), 500
 
 
 @app.route('/api/requisitions', methods=['POST'])
@@ -2474,7 +2476,7 @@ def search_requisition_by_ref():
         return jsonify([dict(r) for r in rows])
     except Exception as e:
         logger.error(f"Error searching requisitions: {e}", exc_info=True)
-        return jsonify([]), 500
+        return jsonify({'status': 'error', 'message': 'Failed to search requisitions'}), 500
 
 
 @app.route('/api/requisitions/<int:pr_id>/receive', methods=['POST'])
@@ -2583,7 +2585,7 @@ def get_requisition_status_history(pr_id):
         return jsonify([dict(u) for u in updates])
     except Exception as e:
         logger.error(f"Error fetching status history for {pr_id}: {e}", exc_info=True)
-        return jsonify([]), 500
+        return jsonify({'status': 'error', 'message': 'Failed to fetch status history'}), 500
 
 
 @app.route('/api/requisitions/<int:pr_id>/rfq')
@@ -2677,7 +2679,7 @@ def get_component_categories():
         return jsonify([dict(r) for r in rows])
     except Exception as e:
         logger.error(f"Error fetching component categories: {e}", exc_info=True)
-        return jsonify([]), 500
+        return jsonify({'status': 'error', 'message': 'Failed to fetch component categories'}), 500
 
 
 @app.route('/api/component-categories', methods=['POST'])
@@ -2725,7 +2727,7 @@ def get_equipment_components(eid):
         return jsonify([dict(r) for r in rows])
     except Exception as e:
         logger.error(f"Error fetching components for equipment {eid}: {e}", exc_info=True)
-        return jsonify([]), 500
+        return jsonify({'status': 'error', 'message': 'Failed to fetch components'}), 500
 
 
 @app.route('/api/equipment/<int:eid>/components', methods=['POST'])
@@ -2905,7 +2907,7 @@ def get_component_history(cid):
         return jsonify([dict(r) for r in rows])
     except Exception as e:
         logger.error(f"Error fetching component history {cid}: {e}", exc_info=True)
-        return jsonify([]), 500
+        return jsonify({'status': 'error', 'message': 'Failed to fetch component history'}), 500
 
 
 @app.route('/api/components/all')
@@ -2924,7 +2926,7 @@ def get_all_components():
         return jsonify([dict(r) for r in rows])
     except Exception as e:
         logger.error(f"Error fetching all components: {e}", exc_info=True)
-        return jsonify([]), 500
+        return jsonify({'status': 'error', 'message': 'Failed to fetch components'}), 500
 
 
 # ---- Plant Hierarchy (Phase 2) ----
@@ -2997,7 +2999,7 @@ def api_plant_roots():
             return jsonify([dict(r) for r in rows])
     except Exception as e:
         logger.error(f"api_plant_roots error: {e}", exc_info=True)
-        return jsonify([]), 500
+        return jsonify({'status': 'error', 'message': 'Failed to fetch plant roots'}), 500
 
 
 @app.route('/api/plant/nodes/<int:node_id>/children')
@@ -3018,7 +3020,7 @@ def api_plant_children(node_id):
             return jsonify([dict(r) for r in rows])
     except Exception as e:
         logger.error(f"api_plant_children error: {e}", exc_info=True)
-        return jsonify([]), 500
+        return jsonify({'status': 'error', 'message': 'Failed to fetch plant children'}), 500
 
 
 @app.route('/api/plant/nodes/<int:node_id>/breadcrumb')
@@ -3029,7 +3031,7 @@ def api_plant_breadcrumb(node_id):
         return jsonify(get_node_breadcrumb(node_id))
     except Exception as e:
         logger.error(f"api_plant_breadcrumb error: {e}", exc_info=True)
-        return jsonify([]), 500
+        return jsonify({'status': 'error', 'message': 'Failed to fetch plant breadcrumb'}), 500
 
 
 @app.route('/api/plant/nodes', methods=['POST'])

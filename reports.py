@@ -2,7 +2,7 @@
 reports.py  -  V8
 Generates Excel reports aligned to the Equipment Availability & Reliability template.
 """
-import os, smtplib, sqlite3
+import os, smtplib, sqlite3, logging
 from datetime import datetime, date, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
@@ -13,6 +13,8 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 from database import get_db
 from scheduler import get_week_start
+
+logger = logging.getLogger(__name__)
 
 try:
     from config import ARCHIVE_MONTHS, SITE_NAME
@@ -33,7 +35,8 @@ def _get_recipients(key):
     import json
     try:
         return json.loads(get_setting(key, '[]'))
-    except:
+    except (ValueError, TypeError) as e:
+        logger.warning(f"Failed to parse recipients for '{key}': {e}")
         return []
 
 REPORTS_DIR = os.path.join(os.path.dirname(__file__), 'reports')
@@ -879,10 +882,10 @@ def send_email(subject, body, attachment_path, extra_recipients=None):
             with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
                 server.login(MAIL_SENDER, MAIL_PASSWORD)
                 server.sendmail(MAIL_SENDER, recipient, msg.as_string())
-        print(f"Email sent: {subject}")
+        logger.info(f"Email sent: {subject}")
         return True
     except Exception as e:
-        print(f"Email failed: {e}")
+        logger.error(f"Email failed: {e}", exc_info=True)
         return False
 
 def send_weekly_report():
@@ -906,7 +909,7 @@ def send_monthly_archive(year=None, month=None):
         from template_report import generate_template_report
         path, _stats = generate_template_report(year, month)
     except Exception as e:
-        print(f"Template report unavailable ({e}); using internal archive.")
+        logger.warning(f"Template report unavailable ({e}); using internal archive.")
         path = generate_monthly_archive(year, month)
     month_s   = date(year, month, 1).strftime('%B %Y')
     site_name = get_setting_local('site_name', SITE_NAME)
@@ -944,5 +947,5 @@ def send_test_email():
             s.sendmail(sender, recipient, msg.as_string())
         return True
     except Exception as e:
-        print(f"Test email failed: {e}")
+        logger.error(f"Test email failed: {e}", exc_info=True)
         return False
