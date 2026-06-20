@@ -3,8 +3,9 @@ Mill Maintenance Terminal - Improved Version
 With error handling, structured logging, and better database management
 """
 
-from flask import Flask, request, jsonify, send_from_directory, send_file
-import json, os, threading, time, logging
+from flask import Flask, request, jsonify, send_from_directory, send_file, session
+from werkzeug.security import generate_password_hash, check_password_hash
+import json, os, secrets, threading, time, logging
 from datetime import datetime, date, timedelta
 from database import get_db_context, init_db, seed_data, get_setting, set_setting, DB_FILE
 from scheduler import generate_weekly_tasks, get_tasks_for_artisan, mark_task_done, get_week_start
@@ -22,6 +23,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__, static_folder=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static'))
+app.secret_key = os.environ.get('FLASK_SECRET_KEY') or secrets.token_hex(32)
 
 # ---- Global Error Handlers ----
 @app.errorhandler(400)
@@ -121,12 +123,29 @@ def verify_pin():
     try:
         with get_db_context() as conn:
             user = conn.execute(
-                "SELECT id,name,role FROM users WHERE id=? AND (pin=? OR pin IS NULL)",
-                (d['user_id'], d['pin'])
+                "SELECT id,name,role,pin FROM users WHERE id=?",
+                (d['user_id'],)
             ).fetchone()
         
-        if user:
-            return jsonify({'valid': True, 'user': dict(user)})
+        if not user:
+            logger.warning(f"Failed PIN verification for user {d['user_id']}")
+            return jsonify({'valid': False})
+
+        stored_pin = user['pin']
+        if stored_pin is None:
+            valid = True
+        elif stored_pin.startswith(('pbkdf2:', 'scrypt:')):
+            valid = check_password_hash(stored_pin, d['pin'])
+        else:
+            valid = (stored_pin == d['pin'])
+            if valid:
+                with get_db_context() as conn:
+                    conn.execute("UPDATE users SET pin=? WHERE id=?",
+                                 (generate_password_hash(d['pin']), user['id']))
+                    conn.commit()
+
+        if valid:
+            return jsonify({'valid': True, 'user': {'id': user['id'], 'name': user['name'], 'role': user['role']}})
         else:
             logger.warning(f"Failed PIN verification for user {d['user_id']}")
             return jsonify({'valid': False})
@@ -144,8 +163,9 @@ def set_pin(uid):
         return jsonify({'status': 'error', 'message': 'PIN must contain exactly 4 digits'}), 400
     
     try:
+        hashed_pin = generate_password_hash(pin) if pin else None
         with get_db_context() as conn:
-            conn.execute("UPDATE users SET pin=? WHERE id=?", (pin or None, uid))
+            conn.execute("UPDATE users SET pin=? WHERE id=?", (hashed_pin, uid))
             conn.commit()
         
         log_action('Admin', 'pin_updated', f"PIN updated for user {uid}")
@@ -170,10 +190,12 @@ def add_user():
         return jsonify({'status': 'error', 'message': 'Stores admin can only add picker or storeman roles'}), 403
 
     try:
+        raw_pin = d.get('pin')
+        hashed_pin = generate_password_hash(str(raw_pin)) if raw_pin else None
         with get_db_context() as conn:
             conn.execute(
                 "INSERT INTO users (name,role,pin) VALUES (?,?,?)",
-                (name, role, d.get('pin'))
+                (name, role, hashed_pin)
             )
             conn.commit()
         
@@ -339,7 +361,7 @@ def test_email():
         return jsonify({'status': status})
     except Exception as e:
         logger.error(f"Test email failed: {e}", exc_info=True)
-        return jsonify({'status': 'failed', 'error': str(e)}), 500
+        return jsonify({'status': 'failed', 'error': 'Email configuration error'}), 500
 
 # ---- Routes: Shift Confirmation ----
 @app.route('/api/shift/check/<int:user_id>')
@@ -3053,7 +3075,7 @@ def api_plant_add_node():
         return jsonify({'id': new_id})
     except Exception as e:
         logger.error(f"api_plant_add_node error: {e}", exc_info=True)
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Failed to add node'}), 500
 
 
 @app.route('/api/plant/nodes/<int:node_id>/move', methods=['PUT'])
@@ -3069,7 +3091,7 @@ def api_plant_move_node(node_id):
         return jsonify({'ok': ok})
     except Exception as e:
         logger.error(f"api_plant_move_node error: {e}", exc_info=True)
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Failed to move node'}), 500
 
 
 @app.route('/api/plant/by-equipment/<int:equip_db_id>')
@@ -3111,7 +3133,7 @@ def api_plant_patch_node(node_id):
         return jsonify({'ok': True})
     except Exception as e:
         logger.error(f"api_plant_patch_node error: {e}", exc_info=True)
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Failed to update node'}), 500
 
 
 @app.route('/api/plant/nodes/<int:node_id>', methods=['DELETE'])
@@ -3128,7 +3150,7 @@ def api_plant_delete_node(node_id):
         return jsonify({'ok': True})
     except Exception as e:
         logger.error(f"api_plant_delete_node error: {e}", exc_info=True)
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Failed to delete node'}), 500
 
 
 # ---- Background Scheduler ----
