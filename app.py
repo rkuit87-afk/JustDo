@@ -9,6 +9,11 @@ from datetime import datetime, date, timedelta
 from database import get_db_context, init_db, seed_data, get_setting, set_setting, DB_FILE
 from scheduler import generate_weekly_tasks, get_tasks_for_artisan, mark_task_done, get_week_start
 from reports import generate_weekly_report, send_weekly_report, send_monthly_archive
+from utils import (
+    time_str_to_minutes, calc_downtime_mins, detect_time_dispute,
+    record_parts_and_reorder, build_downtime_update_params,
+    build_dynamic_update,
+)
 
 # ---- Logging Setup ----
 logging.basicConfig(
@@ -553,16 +558,7 @@ def complete_task(task_id):
                 except (ValueError, TypeError):
                     pass
             # parts used -> reorder
-            for p in (d.get('parts', []) or []):
-                if p.get('desc'):
-                    conn.execute(
-                        "INSERT INTO pm_parts (task_id,part_desc,qty) VALUES (?,?,?)",
-                        (task_id, p['desc'], p.get('qty', 1))
-                    )
-                    conn.execute(
-                        "INSERT INTO reorder (part_desc,qty,source) VALUES (?,?,?)",
-                        (p['desc'], p.get('qty', 1), f'PM Task #{task_id}')
-                    )
+            record_parts_and_reorder(conn, d.get('parts', []), 'pm', task_id)
             conn.commit()
         log_action(d.get('completed_by_name', 'Artisan'), 'task_completed', f"Task #{task_id} completed")
         return jsonify({'status': 'ok'})
@@ -673,21 +669,7 @@ def get_task_history(user_id):
 # ============================================================
 def _recalc_downtime(b):
     """Compute downtime minutes from start/end strings (HH:MM)."""
-    def mins(t):
-        try:
-            h, m = str(t).split(':')[:2]
-            return int(h) * 60 + int(m)
-        except Exception:
-            return None
-    start = b.get('final_time_start') or b.get('art_time_start') or b.get('sup_time_start')
-    end = b.get('final_time_end') or b.get('art_time_end') or b.get('sup_time_end')
-    s, e = mins(start), mins(end)
-    if s is None or e is None:
-        return None
-    dur = e - s
-    if dur < 0:
-        dur += 1440  # crossed midnight
-    return dur
+    return calc_downtime_mins(b)
 
 
 @app.route('/api/breakdowns/supervisor', methods=['POST'])
@@ -833,7 +815,6 @@ def artisan_complete_breakdown(bd_id):
             disputed = 0
             dispute_field = None
             if sup_done:
-                # Compare artisan times against supervisor's recorded times
                 art_start = d.get('art_time_start', '')
                 art_end   = d.get('art_time_end', '')
                 sup_start = (b.get('sup_time_start') or '')[:5]
@@ -841,11 +822,8 @@ def artisan_complete_breakdown(bd_id):
                 if not sup_end:
                     ct = b.get('sup_completed_at') or ''
                     sup_end = ct[11:16] if len(ct) > 15 else ''
-                if art_start and sup_start and art_start != sup_start:
-                    disputed = 1; dispute_field = 'time_start'
-                if art_end and sup_end and art_end != sup_end:
-                    disputed = 1
-                    dispute_field = (dispute_field + ', time_end') if dispute_field else 'time_end'
+                disputed, dispute_field = detect_time_dispute(art_start, art_end, sup_start, sup_end)
+                disputed = int(disputed)
 
             b['art_time_start'] = d.get('art_time_start')
             b['art_time_end']   = d.get('art_time_end')
@@ -870,16 +848,7 @@ def artisan_complete_breakdown(bd_id):
                 datetime.now().isoformat(), new_status, disputed, dispute_field,
                 downtime, ftype, downtime, ftype, downtime, bd_id
             ))
-            for p in (d.get('parts', []) or []):
-                if p.get('desc'):
-                    conn.execute(
-                        "INSERT INTO breakdown_parts (breakdown_id,part_desc,qty,logged_by) VALUES (?,?,?,'artisan')",
-                        (bd_id, p['desc'], p.get('qty', 1))
-                    )
-                    conn.execute(
-                        "INSERT INTO reorder (part_desc,qty,source) VALUES (?,?,?)",
-                        (p['desc'], p.get('qty', 1), f'Breakdown #{bd_id}')
-                    )
+            record_parts_and_reorder(conn, d.get('parts', []), 'breakdown', bd_id)
             conn.commit()
         log_action(d.get('artisan_name', 'Artisan'), 'breakdown_completed', f"Breakdown #{bd_id} ({new_status})")
         return jsonify({'status': 'ok', 'disputed': bool(disputed), 'new_status': new_status})
@@ -1697,16 +1666,11 @@ def update_user(uid):
     d = safe_json(request)
     try:
         with get_db_context() as conn:
-            fields = []
-            params = []
-            for col in ('name', 'role', 'trade', 'department', 'create_scope'):
-                if col in d:
-                    fields.append(f"{col}=?")
-                    params.append(d[col])
-            for col in ('can_requisition', 'stores_access'):
-                if col in d:
-                    fields.append(f"{col}=?")
-                    params.append(int(d[col]))
+            fields, params = build_dynamic_update(
+                d,
+                allowed_fields=('name', 'role', 'trade', 'department', 'create_scope'),
+                int_fields=('can_requisition', 'stores_access'),
+            )
             if not fields:
                 return jsonify({'status': 'error', 'message': 'No fields to update'}), 400
             params.append(uid)
@@ -1870,12 +1834,11 @@ def update_equipment(eid):
     d = safe_json(request)
     try:
         with get_db_context() as conn:
-            fields, params = [], []
-            for col in ('name', 'area', 'area_code', 'section', 'description',
-                        'criticality', 'planned_hrs_day'):
-                if col in d:
-                    fields.append(f"{col}=?")
-                    params.append(d[col])
+            fields, params = build_dynamic_update(
+                d,
+                allowed_fields=('name', 'area', 'area_code', 'section', 'description',
+                                'criticality', 'planned_hrs_day'),
+            )
             if not fields:
                 return jsonify({'status': 'error', 'message': 'No fields to update'}), 400
             params.append(eid)
@@ -1958,11 +1921,8 @@ def supervisor_complete_breakdown(bd_id):
                 art_start = (b.get('art_time_start') or '')[:5]
                 art_end   = (b.get('art_time_end')   or '')[:5]
                 sup_start = (b.get('sup_time_start') or '')[:5]
-                if art_start and sup_start and art_start != sup_start:
-                    disputed = 1; dispute_field = 'time_start'
-                if art_end and end_hhmm and art_end != end_hhmm:
-                    disputed = 1
-                    dispute_field = (dispute_field + ', time_end') if dispute_field else 'time_end'
+                disputed, dispute_field = detect_time_dispute(art_start, art_end, sup_start, end_hhmm)
+                disputed = int(disputed)
 
             new_status = ('disputed' if disputed else 'complete') if art_done else 'awaiting_artisan_review'
 
@@ -2047,22 +2007,12 @@ def artisan_review_breakdown(bd_id):
                 sup_end = ct[11:16] if 'T' in ct else ct[11:16]
 
             # Detect dispute: artisan changed either time
-            disputed = 0
-            if art_start and art_start != sup_start:
-                disputed = 1
-            if art_end and art_end != sup_end:
-                disputed = 1
+            disputed, _ = detect_time_dispute(art_start, art_end, sup_start, sup_end)
+            disputed = int(disputed)
 
             # Recalculate downtime from final times
-            def to_mins(t):
-                try:
-                    h, m = str(t).split(':')[:2]
-                    return int(h)*60 + int(m)
-                except Exception:
-                    return None
-
-            start_m = to_mins(art_start or sup_start)
-            end_m   = to_mins(art_end or sup_end)
+            start_m = time_str_to_minutes(art_start or sup_start)
+            end_m   = time_str_to_minutes(art_end or sup_end)
             downtime = None
             if start_m is not None and end_m is not None:
                 downtime = end_m - start_m
@@ -2094,21 +2044,7 @@ def artisan_review_breakdown(bd_id):
                 bd_id
             ))
             # Parts used
-            for p in (d.get('parts', []) or []):
-                if p.get('desc'):
-                    conn.execute(
-                        "INSERT INTO breakdown_parts "
-                        "(breakdown_id,part_desc,qty,logged_by,is_other,other_note) "
-                        "VALUES (?,?,?,'artisan',?,?)",
-                        (bd_id, p['desc'], p.get('qty',1),
-                         1 if p.get('is_other') else 0,
-                         p.get('other_note',''))
-                    )
-                    if not p.get('is_other'):
-                        conn.execute(
-                            "INSERT INTO reorder (part_desc,qty,source) VALUES (?,?,?)",
-                            (p['desc'], p.get('qty',1), f'Breakdown #{bd_id}')
-                        )
+            record_parts_and_reorder(conn, d.get('parts', []), 'breakdown', bd_id)
             conn.commit()
 
         log_action(d.get('artisan_name', 'Artisan'), 'breakdown_reviewed',
